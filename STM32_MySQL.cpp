@@ -676,8 +676,6 @@ char* MySQL::read_string(int *offset){
     char *str = NULL;
     char head = buffer[*(offset)];
 
-    //printf("read_string len : %d\r\n",len);
-    //printf("buffer[%d] : %X\r\n",*offset,head);
     if(head==0xFE) return NULL;
     
     str = (char*)malloc(len+1);
@@ -764,7 +762,6 @@ int MySQL::get_fields(){
 
     if (buffer == NULL) return 0;
 
-    printf("Packet len : %X:%X:%X\r\n",buffer[0],buffer[1],buffer[2]);
     num_fields = buffer[4];//Column count
     columns.num_fields = num_fields;
     num_cols = num_fields; // Save this for later use
