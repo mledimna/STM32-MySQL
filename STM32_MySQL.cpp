@@ -26,7 +26,7 @@
 #define MAX_CONNECT_ATTEMPTS    3
 #define MAX_TIMEOUT             10
 #define MIN_BYTES_NETWORK       8
-#define RECV_SIZE               10000
+#define RECV_SIZE               50000
 
 MySQL::MySQL(TCPSocket* sock):tcp_socket(sock){
 }
@@ -243,7 +243,7 @@ int MySQL::run_query(int query_len)
     // Read a response packet and check it for Ok or Error.
     read_packet();
     int res = check_ok_packet();
-    if ((res==ERROR_PACKET)||(res==EOF_PACKET)) return 0;
+    if ((res==ERROR_PACKET)||(pack_len<=0)) return 0;
     columns_read = 0;//Not an Ok packet, so we now have the result set to process.
     return 1;
 }
@@ -252,7 +252,7 @@ int MySQL::run_query(int query_len)
 /**
  * run_query_no_read - execute a query
  *
- * This method sends the query string to the server but does not waits for a
+ * This method sends the query string to the server but dk_lens not waits for a
  * response.
  *
  * query_len[in]   Number of bytes in the query string
@@ -390,6 +390,7 @@ int MySQL::send_authentication_packet(char *user, char *password)
   len = strlen((char*)buffer);
 
   status = mysql_write((char*)buffer,size_send);
+  read_packet();//To flush TCP socket
   return status;
 }
 
@@ -518,23 +519,18 @@ void MySQL::read_packet() {
     packet_len = pack_len - 4;
 
   // Check for valid packet.
-  if (packet_len < 0) {
-    //print_message(PACKET_ERROR, true);
-    packet_len = 0;
-  }
-  buffer = (unsigned char*)malloc(packet_len+4);
-  if (buffer == NULL) {
-    //print_message(MEMORY_ERROR, true);
-    return;
-  }
-  for (int i = 0; i < 4; i++)
-    buffer[i] = local[i];
+  if (packet_len < 0) packet_len = 0;
 
-  for (int i = 4; i < packet_len+4; i++) {
-    buffer[i] = data_rec[i];
-  }
+  buffer = (unsigned char*)malloc(packet_len+4);
+  
+  if (buffer == NULL) return;
+
+  for (int i = 0; i < 4; i++) buffer[i] = local[i];
+  for (int i = 4; i < packet_len+4; i++) buffer[i] = data_rec[i];
+
   memset( data_rec, '\0', sizeof(*data_rec) );
   free(data_rec);
+
   data_rec = NULL;
 }
 
