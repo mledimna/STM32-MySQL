@@ -46,12 +46,12 @@ int MySQL::connect(char* user, char* password){
     int i = -1;
     unsigned int count = 0;
     int ret=0;
-    // Retry up to MAX_CONNECT_ATTEMPTS times 0.5 second apart.
+    
     if (tcp_socket!=NULL) {
         read_packet();
         parse_handshake_packet();
         ret = send_authentication_packet(user, password);
-        free(server_version); // don't need it anymore
+        free(server_version);
         return ret;
     }
 
@@ -83,21 +83,16 @@ void MySQL::disconnect()
  * Returns boolean - True = a result set is available for reading
 */
 int MySQL::cmd_query(const char *query){
-	int i, g = 4;
-    int query_len = (int)strlen(query);
+    int i, g = 4;
+    int query_len = strlen(query);
+
     if (buffer != NULL) free(buffer);
+    buffer = (unsigned char*)malloc(query_len+5);
 
-  buffer = (unsigned char*)malloc(query_len+5);
-  memcpy(&buffer[0], "\0", query_len + 5);
-  // Write query to packet
-  memcpy(&buffer[5], query, query_len);
-  /*for (int i = 0; i < query_len; i++)
-  {
-	  buffer[g++] = query[i];
-  }*/
+    memcpy(buffer, "\0", query_len + 5);
+    memcpy(&buffer[5], query, query_len);// Write query to packet
 
-  // Send the query
-  return run_query(query_len);
+    return run_query(query_len);// Send the query
 }
 
 int MySQL::cmd_query_no_read(const char *query)
@@ -230,29 +225,27 @@ column_names* MySQL::get_columns() {
 */
 int MySQL::run_query(int query_len)
 {
-	unsigned int count = 0;
+    unsigned int count = 0;
+    /*
+        Query looks like :
+        [query length] [query length] [query length] [sequence id] [payload]
+        Query len is coded as a 1 byte int if(len<0xFF)
+        Query len is coded as a 2 bytes int if(len<0xFFFF)
+        Query len is coded as a 3 bytes int if(len<0xFFFFFF)
+    */
+    store_int(buffer, query_len+1, 3);//Store an integer value into a byte array of size bytes.
+    
+    buffer[3] = 0x00;// Initiator
+    buffer[4] = 0x03; //Command packet
 
-  store_int(&buffer[0], query_len+1, 3);
-  // TODO: Abort if query larger than sizeof(buffer);
-  buffer[3] = 0x00;
-  buffer[4] = 0x03;  // command packet
+    mysql_write((char*)buffer,query_len + 5);// Send the query
 
-  // Send the query
-
-  mysql_write((char*)buffer,query_len + 5);
-
-  // Read a response packet and check it for Ok or Error.
-  read_packet();
-  int res = check_ok_packet();
-  if (res == ERROR_PACKET) {
-    return 0;
-  } else if (!res) {
-    return 0;
-  }
-  // Not an Ok packet, so we now have the result set to process.
-  columns_read = 0;
-  return 1;
-
+    // Read a response packet and check it for Ok or Error.
+    read_packet();
+    int res = check_ok_packet();
+    if ((res==ERROR_PACKET)||(res==EOF_PACKET)) return 0;
+    columns_read = 0;//Not an Ok packet, so we now have the result set to process.
+    return 1;
 }
 
 
@@ -515,7 +508,10 @@ void MySQL::read_packet() {
   uint8_t local[4];
   int i = 0;
 
-  if (buffer != NULL) free(buffer);
+  if (buffer != NULL) {
+      free(buffer);
+      buffer = NULL;
+  }
     data_rec = (uint8_t*)malloc(RECV_SIZE);
     pack_len = tcp_socket->recv(data_rec, RECV_SIZE);
 
@@ -539,6 +535,7 @@ void MySQL::read_packet() {
   }
   memset( data_rec, '\0', sizeof(*data_rec) );
   free(data_rec);
+  data_rec = NULL;
 }
 
 void MySQL::read_packet_limit() {
@@ -675,15 +672,19 @@ int MySQL::get_lcb_len(int offset) {
  * Returns string - String from the buffer
 */
 char* MySQL::read_string(int *offset){
-  //int len_bytes = get_lcb_len(buffer[*offset]);
-	int len_bytes = get_lcb_len(*offset);
-  //int len = read_int(*offset, len_bytes);
-	int len = len_bytes;
-  char *str = (char*)malloc(len+1);
-  strncpy(str, (char *)&buffer[*offset+1], len);
-  str[len] = 0x00;
-  //*offset += len_bytes+len;
-  return str;
+    int len = get_lcb_len(*offset);
+    char *str = NULL;
+    char head = buffer[*(offset)];
+
+    //printf("read_string len : %d\r\n",len);
+    //printf("buffer[%d] : %X\r\n",*offset,head);
+    if(head==0xFE) return NULL;
+    
+    str = (char*)malloc(len+1);
+    memcpy(str, (char *)&buffer[*offset+1], len);
+    str[len] = '\0';
+
+    return str;
 }
 
 /**
@@ -701,16 +702,19 @@ int MySQL::read_int(int offset, int size){
   int value = 0;
   int new_size = 0;
   int i;
-  if (size == 0)
-     new_size = get_lcb_len(offset);
-  if (size == 1)
-     return buffer[offset];
+
+  if (size == 0) new_size = get_lcb_len(offset);
+  if (size == 1) return buffer[offset];
+
   new_size = size;
+
   int shifter = (new_size - 1) * 8;
+
   for (int i = new_size; i > 0; i--) {
     value += (uint8_t)(buffer[i-1] << shifter);
     shifter -= 8;
   }
+
   return value;
 }
 
@@ -728,22 +732,22 @@ int MySQL::read_int(int offset, int size){
  * size[in]        number of bytes to use to store the integer
 */
 void MySQL::store_int(uint8_t *buff, long value, int size){
-  memset(buff, 0, size);
-  if (value < 0xff)
-    buff[0] = (uint8_t)value;
-  else if (value < 0xffff) {
-    buff[0] = (uint8_t)value;
-    buff[1] = (uint8_t)(value >> 8);
-  } else if (value < 0xffffff) {
-    buff[0] = (uint8_t)value;
-    buff[1] = (uint8_t)(value >> 8);
-    buff[2] = (uint8_t)(value >> 16);
-  } else if (value < 0xffffff) {
-    buff[0] = (uint8_t)value;
-    buff[1] = (uint8_t)(value >> 8);
-    buff[2] = (uint8_t)(value >> 16);
-    buff[3] = (uint8_t)(value >> 24);
-  }
+    memset(buff, 0, size);
+    if (value < 0xff)
+        buff[0] = (uint8_t)value;
+    else if (value < 0xffff) {
+        buff[0] = (uint8_t)value;
+        buff[1] = (uint8_t)(value >> 8);
+    } else if (value < 0xffffff) {
+        buff[0] = (uint8_t)value;
+        buff[1] = (uint8_t)(value >> 8);
+        buff[2] = (uint8_t)(value >> 16);
+    } else if (value < 0xffffff) {
+        buff[0] = (uint8_t)value;
+        buff[1] = (uint8_t)(value >> 8);
+        buff[2] = (uint8_t)(value >> 16);
+        buff[3] = (uint8_t)(value >> 24);
+    }
 }
 
 
@@ -756,41 +760,41 @@ void MySQL::store_int(uint8_t *buff, long value, int size){
  *
 */
 int MySQL::get_fields(){
-  int num_fields = 0, f , offset = 13, len_bytes;
+    int num_fields = 0, f , offset = 13, len_bytes;
 
-  if (buffer == NULL) {
-    return 0;
-  }
-  num_fields = buffer[4]; // From result header packet
-  columns.num_fields = num_fields;
-  num_cols = num_fields; // Save this for later use
+    if (buffer == NULL) return 0;
 
-  len_bytes = get_lcb_len(offset);
-  columns.db = read_string(&offset);
-  // get table
-  offset += len_bytes + 1;
-  columns.table = read_string(&offset);
+    printf("Packet len : %X:%X:%X\r\n",buffer[0],buffer[1],buffer[2]);
+    num_fields = buffer[4];//Column count
+    columns.num_fields = num_fields;
+    num_cols = num_fields; // Save this for later use
 
-  for (int f = 0; f < num_fields; f++) {
-    field_struct *field = (field_struct *)malloc(sizeof(field_struct));
 
     len_bytes = get_lcb_len(offset);
-    offset += (len_bytes+ 1) * 2;
-    field->name = read_string(&offset);
-    len_bytes = get_lcb_len(offset);
-    offset += (len_bytes+ 1) * 2;
+    columns.db = read_string(&offset);
+    // get table
+    offset += len_bytes + 1;
+    columns.table = read_string(&offset);
 
-    if((f+1) != num_fields)
-    {
-    	offset += 21;
-    	len_bytes = get_lcb_len(offset);
-    	offset += len_bytes + 1;
+    for (int f = 0; f < num_fields; f++) {
+        field_struct *field = (field_struct *)malloc(sizeof(field_struct));
+
+        len_bytes = get_lcb_len(offset);
+        offset += (len_bytes+ 1) * 2;
+        field->name = read_string(&offset);
+        len_bytes = get_lcb_len(offset);
+        offset += (len_bytes+ 1) * 2;
+
+        if((f+1) != num_fields){
+            offset += 21;
+            len_bytes = get_lcb_len(offset);
+            offset += len_bytes + 1;
+        }
+        columns.fields[f] = field;
     }
-    columns.fields[f] = field;
-  }
-  columns_read = 1;
-  get_row_values( &offset);
-  return 1;
+    columns_read = 1;
+    get_row_values( &offset);
+    return 1;
 }
 
 
@@ -803,22 +807,25 @@ int MySQL::get_fields(){
  *
 */
 int MySQL::get_row_values( int *off) {
-  int res = 0;
-  int offset = *off + 26;
-  int f;
-  int len_bytes;
-  // It is an error to try to read rows before columns
-  // are read.
-  if (!columns_read) {
-    return EOF_PACKET;
-  }
-   for (int f = 0; f < num_cols; f++) {
-    	len_bytes = get_lcb_len(offset);
-    	columns.fields[f]->data = read_string(&offset);
-    	offset += len_bytes+ 1;
+    int res = 0;
+    int offset = *off + 26;
+    int f;
+    int len_bytes;
+    // It is an error to try to read rows before columns
+    // are read.
+    if (!columns_read) {
+        return EOF_PACKET;
+    }
+    for (int f = 0; f < num_cols; f++) {
+        if(buffer[offset]!=0xFE){//If packet is not a EOF_Packet
+            len_bytes = get_lcb_len(offset);
+            columns.fields[f]->data = read_string(&offset);
+            offset += len_bytes+ 1;
+        }
+        else columns.fields[f]->data = NULL;
     }
 
-  return 1;
+    return 1;
 }
 
 
