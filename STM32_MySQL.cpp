@@ -177,10 +177,10 @@ void MySQL::free_columns_buffer() {
   // clear the columns and data
   for (int f = 0; f < MAX_FIELDS; f++) {
     if (columns.fields[f] != NULL) {
-    	if(columns.fields[f]->name!=NULL) free(columns.fields[f]->name);
-    	if(columns.fields[f]->data!=NULL) free(columns.fields[f]->data);
+    	free(columns.fields[f]->name);
+    	free(columns.fields[f]);
     }
-    free(columns.fields[f]);
+    columns.fields[f] = NULL;
   }
   num_cols = 0;
   columns_read = 0;
@@ -286,8 +286,6 @@ int MySQL::run_query_no_read(int query_len){
   buffer = NULL;
   // Not an Ok packet, so we now have the result set to process.
   columns_read = 0;
-
-  tcp_socket->recv(data_rec, RECV_SIZE);
   return 1;
 
 }
@@ -513,6 +511,7 @@ void MySQL::read_packet() {
 
   if (buffer != NULL) {
       free(buffer);
+      buffer = NULL;
   }
     data_rec = (uint8_t*)malloc(RECV_SIZE);
     pack_len = tcp_socket->recv(data_rec, RECV_SIZE);
@@ -523,6 +522,7 @@ void MySQL::read_packet() {
   if (packet_len < 0) packet_len = 0;
 
   buffer = (unsigned char*)malloc(packet_len+4);
+  
   if (buffer == NULL) return;
 
   for (int i = 0; i < 4; i++) buffer[i] = local[i];
@@ -671,6 +671,8 @@ char* MySQL::read_string(int *offset){
     int len = get_lcb_len(*offset);
     char *str = NULL;
     char head = buffer[*(offset)];
+
+    if(head==0xFE) return NULL;
     
     str = (char*)malloc(len+1);
     memcpy(str, (char *)&buffer[*offset+1], len);
@@ -802,20 +804,18 @@ int MySQL::get_row_values( int *off) {
     int offset = *off + 26;
     int f;
     int len_bytes;
-    bool err = false;
     // It is an error to try to read rows before columns
     // are read.
     if (!columns_read) {
         return EOF_PACKET;
     }
     for (int f = 0; f < num_cols; f++) {
-        len_bytes = get_lcb_len(offset);
-        if((buffer[offset]!=0xFE)||err) columns.fields[f]->data = read_string(&offset);
-        else{
-            err = true;
-            columns.fields[f]->data = NULL;
+        if(buffer[offset]!=0xFE){//If packet is not a EOF_Packet
+            len_bytes = get_lcb_len(offset);
+            columns.fields[f]->data = read_string(&offset);
+            offset += len_bytes+ 1;
         }
-        offset += len_bytes+ 1;
+        else columns.fields[f]->data = NULL;
     }
 
     return 1;
