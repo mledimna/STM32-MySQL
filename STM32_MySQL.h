@@ -38,9 +38,19 @@ class MySQL{
     void disconnect();
 
     int cmd_query(const char *query);
-    int cmd_query_no_read(const char *query);
     column_names *get_columns();
-    
+
+    /*
+    NEW FUNCTIONS :
+        -Dynamic allocation
+        -Thread Safe
+    */
+    int query(const char* query);
+    bool recieve(void);
+    /*
+    END NEW FUNCTIONS
+    */
+
     int getBuffer(uint8_t* ext_buffer);
 
     private:
@@ -76,7 +86,6 @@ class MySQL{
     void parse_handshake_packet();
     int check_ok_packet();
     int run_query(int query_len);
-    int run_query_no_read(int query_len);
 
     // Utility methods
     int scramble_password(char *password, uint8_t *pwd_hash);

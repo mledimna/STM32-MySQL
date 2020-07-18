@@ -95,39 +95,6 @@ int MySQL::cmd_query(const char *query){
     return run_query(query_len);// Send the query
 }
 
-int MySQL::cmd_query_no_read(const char *query)
-{
-	int i, g = 5;
-  int query_len = (int)strlen(query);
-
-  if (buffer != 0)
-  {
-	  for (int i = 0; i < query_len; i++)
-	  {
-		  buffer[i] = 0x00;
-	  }
-	  free(buffer);
-	  buffer = NULL;
-  }
-
-  buffer = (unsigned char*)malloc(query_len+5);
-  //memcpy(&buffer[0], "\0", query_len);
-  // Write query to packet
-  for (int i = 0; i < query_len+5; i++)
-    {
-  	  buffer[i++] = 0x00;
-    }
-
-  //memcpy(&buffer[5], query, query_len);
-  for (int i = 0; i < query_len; i++)
-  {
-	  buffer[g++] = query[i];
-  }
-
-  // Send the query
-  return run_query_no_read(query_len);
-}
-
 /**
  * clear_ok_packet - clear last Ok packet (if present)
  *
@@ -226,68 +193,108 @@ column_names* MySQL::get_columns() {
 int MySQL::run_query(int query_len)
 {
     unsigned int count = 0;
-    /*
-        Query looks like :
-        [query length] [query length] [query length] [sequence id] [payload]
-        Query len is coded as a 1 byte int if(len<0xFF)
-        Query len is coded as a 2 bytes int if(len<0xFFFF)
-        Query len is coded as a 3 bytes int if(len<0xFFFFFF)
-    */
-    store_int(buffer, query_len+1, 3);//Store an integer value into a byte array of size bytes.
+
+    //Set the first 3 bytes of the packet as the payload length (int<3>)
+    store_int(buffer, query_len+1, 3);
     
-    buffer[3] = 0x00;// Initiator
-    buffer[4] = 0x03; //Command packet
+    buffer[3] = 0x00;//Sequence ID to 0 (Initiator)
+    buffer[4] = 0x03;//0x03 : command packet
 
-    mysql_write((char*)buffer,query_len + 5);// Send the query
+    //Send the query
+    mysql_write((char*)buffer,query_len + 5);
 
-    // Read a response packet and check it for Ok or Error.
-    read_packet();
-    int res = check_ok_packet();
-    if ((res==ERROR_PACKET)||(pack_len<=0)) return 0;
+    read_packet();//Read a response packet and stores it into buffer
+
+    int res = check_ok_packet();//Check if it's an ok packet
+
+    if ((res==ERROR_PACKET)||(pack_len<=0)) return 0;//Return 0 if not valid
+    
     columns_read = 0;//Not an Ok packet, so we now have the result set to process.
     return 1;
 }
 
+bool MySQL::recieve(void){
+    int packet_length = 0; //Packet Length
+    uint8_t* packet = NULL; //Used to store recieved MySQL packet data
+    uint8_t data = 0x00; //Buffer for recieved data
+    nsapi_size_or_error_t ret = 0; //Socket return type to check if there was something to read or if an error occured
 
-/**
- * run_query_no_read - execute a query
- *
- * This method sends the query string to the server but dk_lens not waits for a
- * response.
- *
- * query_len[in]   Number of bytes in the query string
- *
- * 
-*/
+    //To avoid blocking the thread, set the recieve timeout to 1000ms
+    tcp_socket->set_timeout(1000);
 
-int MySQL::run_query_no_read(int query_len){
-	//unsigned int count = 0;
-  store_int(&buffer[0], query_len+1, 3);
-  // TODO: Abort if query larger than sizeof(buffer);
-  buffer[3] = 0x00;
-  buffer[4] = 0x03;  // command packet
+    printf("\r\nPacket recieved : \r\n");
 
-  // Send the query
-  mysql_write((char*)buffer,query_len + 5);
+    //While there is something to read from the socket we execute the following algorithm
+    while(ret>=0){
+        //Store recieved data
+        ret = tcp_socket->recv(&data, 1);
+        
+        //If there was something to read
+        if(ret>=0){
+            packet_length++;
 
-  /*read_packet_limit();
-    int res = check_ok_packet();
-    if (res == ERROR_PACKET) {
-      return 0;
-    } else if (!res) {
-    	  memset( buffer, '\0', sizeof(buffer) );
-    	  free(buffer);
-    	  buffer = NULL;
-      return 0;
-    }*/
+            //If it's the forst byte, use malloc, else use realloc for length-variable table
+            if(packet_length==0) packet = (uint8_t*)malloc(sizeof(uint8_t));
+            else packet = (uint8_t*)realloc(packet, sizeof(uint8_t)*packet_length);
 
-  memset( buffer, '\0', sizeof(*buffer) );
-  free(buffer);
-  buffer = NULL;
-  // Not an Ok packet, so we now have the result set to process.
-  columns_read = 0;
-  return 1;
+            //If malloc or realloc worked, append the recieved data to the last allocated index
+            //Else return erro to user
+            if(packet!=NULL) packet[packet_length-1] = data;
+            else{
+                printf("Memory allocation error...\r\n");
+                return false;
+            }
+        }
+    }
 
+    for(int i=0; i<packet_length; i++) printf("%c ",packet[i]);
+    printf("\r\nPacket size : %d\r\n",packet_length);
+    printf("END : %d\r\n",ret);
+
+    //If there was nothing to read, return an error to the user
+    if(packet_length==0) return false;
+
+    //To avoid opening another thread on https://stackoverflow.com/
+    free(packet);
+
+    //No error, something available
+    return true;
+}
+
+int MySQL::query(const char *pQuery){
+    char * packet = NULL;
+    int packet_len = 0;
+    int payload_len = 0;
+    int ret = 0;
+
+    /*
+    COM_QUERY : 
+        The SQL packet length is :
+            -4 bytes : Header (Payload length<3> + Sequence ID<1>)
+            -1 byte : 0x03 (COM_QUERY Flag<1>)
+            -n byte(s) : Query length<n>
+    */
+
+    payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
+    packet_len = payload_len+4; //Header + Payload length
+
+    packet = (char*)malloc(packet_len); //Allocate memory for the packet
+
+    store_int((uint8_t*)packet, payload_len, 3);
+
+    packet[3] = 0x00; //Sequence ID : Initiator
+    packet[4] = 0x03; //Set flag to COM_QUERY
+    for(int i=0; i<strlen(pQuery); i++) packet[i+5] = pQuery[i]; //Insert query into packet
+
+    printf("\r\n");
+    for(int i=0; i<packet_len; i++) printf("%c ",packet[i]);
+    printf("\r\n");
+    
+    ret = mysql_write(packet,packet_len);
+
+    free(packet);
+
+    return ret;
 }
 
 /**
