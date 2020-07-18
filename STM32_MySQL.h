@@ -12,6 +12,13 @@
 #define WITH_SELECT
 #define DEST_PORT ((uint16_t)3306)
 
+typedef enum{
+    PACKET_OK = 0x00,
+    PACKET_ERR = 0x01,
+    PACKET_EOF = 0x02,
+    PACKET_UNKNOWN = 0x03
+}Packet_Type;
+
 typedef struct {
 char *name;
 char *data;
@@ -47,6 +54,8 @@ class MySQL{
     */
     int query(const char* query);
     bool recieve(void);
+    Packet_Type identifyPacket(uint8_t* packet, int packet_length);
+    int readInt(uint8_t * packet, int offset, int size);
     /*
     END NEW FUNCTIONS
     */

@@ -190,8 +190,7 @@ column_names* MySQL::get_columns() {
  * Returns boolean - true = result set available,
  *                   false = no result set returned.
 */
-int MySQL::run_query(int query_len)
-{
+int MySQL::run_query(int query_len){
     unsigned int count = 0;
 
     //Set the first 3 bytes of the packet as the payload length (int<3>)
@@ -214,15 +213,16 @@ int MySQL::run_query(int query_len)
 }
 
 bool MySQL::recieve(void){
-    int packet_length = 0; //Packet Length
-    uint8_t* packet = NULL; //Used to store recieved MySQL packet data
+    int data_recieved_length = 0; //Packet Length
+    uint8_t* data_recieved = NULL; //Used to store recieved MySQL server response
+
+    int packets_count = 0;
+    uint8_t** packets_received = NULL;
     uint8_t data = 0x00; //Buffer for recieved data
     nsapi_size_or_error_t ret = 0; //Socket return type to check if there was something to read or if an error occured
 
     //To avoid blocking the thread, set the recieve timeout to 1000ms
     tcp_socket->set_timeout(1000);
-
-    printf("\r\nPacket recieved : \r\n");
 
     //While there is something to read from the socket we execute the following algorithm
     while(ret>=0){
@@ -231,15 +231,15 @@ bool MySQL::recieve(void){
         
         //If there was something to read
         if(ret>=0){
-            packet_length++;
+            data_recieved_length++;
 
-            //If it's the forst byte, use malloc, else use realloc for length-variable table
-            if(packet_length==0) packet = (uint8_t*)malloc(sizeof(uint8_t));
-            else packet = (uint8_t*)realloc(packet, sizeof(uint8_t)*packet_length);
+            //If it's the first byte, use malloc, else use realloc for length-variable table
+            if(data_recieved_length==0) data_recieved = (uint8_t*)malloc(sizeof(uint8_t));
+            else data_recieved = (uint8_t*)realloc(data_recieved, sizeof(uint8_t)*data_recieved_length);
 
             //If malloc or realloc worked, append the recieved data to the last allocated index
             //Else return erro to user
-            if(packet!=NULL) packet[packet_length-1] = data;
+            if(data_recieved!=NULL) data_recieved[data_recieved_length-1] = data;
             else{
                 printf("Memory allocation error...\r\n");
                 return false;
@@ -247,18 +247,79 @@ bool MySQL::recieve(void){
         }
     }
 
-    for(int i=0; i<packet_length; i++) printf("%c ",packet[i]);
-    printf("\r\nPacket size : %d\r\n",packet_length);
-    printf("END : %d\r\n",ret);
-
     //If there was nothing to read, return an error to the user
-    if(packet_length==0) return false;
+    if(data_recieved_length==0) return false;
+
+    int payload_len = 0;
+
+    for(int offset=0; offset<data_recieved_length; offset+=4+payload_len){
+        
+        packets_count++;
+        payload_len = this->readInt(data_recieved, offset, 3);
+
+        if(offset==0)packets_received = (uint8_t**)malloc(sizeof(uint8_t*));
+        else packets_received = (uint8_t**)realloc(packets_received,sizeof(uint8_t*)*packets_count);
+
+        if(packets_received!=NULL) packets_received[packets_count-1] = (uint8_t*)malloc(sizeof(uint8_t)*(payload_len+4));
+        else {
+            printf("Memory allocation error...\r\n");
+            return false;
+        }
+
+        for(int i=0; i<payload_len+4; i++) packets_received[packets_count-1][i] = data_recieved[offset+i];
+    }
 
     //To avoid opening another thread on https://stackoverflow.com/
-    free(packet);
+    free(data_recieved);
+
+    printf("Packet(s) received : %d\r\n",packets_count);
+
+    for(int i=0; i<packets_count; i++){
+        payload_len = this->readInt(packets_received[i], 0, 3);
+        printf("Packent n°%d (len = %d, Type = 0x%X) : \r\n",i,payload_len+4,this->identifyPacket(packets_received[i],payload_len+4));
+        for(int j=0; j<payload_len+4; j++) printf("%X ",packets_received[i][j]);
+        printf("\r\n");
+    }
+
+    //To avoid opening another thread on https://stackoverflow.com/
+    for(int i=0; i<packets_count; i++) free(packets_received[i]);
+    free(packets_received);
 
     //No error, something available
     return true;
+}
+
+int MySQL::readInt(uint8_t * packet, int offset, int size) {
+  int value = 0;
+
+  for(int i=0; i<size; i++) value |= packet[i+offset]<<(i*8);
+
+  return value;
+}
+
+Packet_Type MySQL::identifyPacket(uint8_t* packet, int packet_length){
+    Packet_Type type = PACKET_UNKNOWN;
+
+    if(packet_length>0){
+        switch(packet[4]){
+            case 0x00:
+                type = PACKET_OK;
+            break;
+
+            case 0xFF:
+                type = PACKET_ERR;
+            break;
+
+            case 0xFE:
+                type = PACKET_EOF;
+            break;
+
+            default:
+            break;
+        }
+    }
+
+    return type;
 }
 
 int MySQL::query(const char *pQuery){
