@@ -571,9 +571,9 @@ void MySQL::read_packet() {
       buffer = NULL;
   }
     data_rec = (uint8_t*)malloc(RECV_SIZE);
-    pack_len = tcp_socket->recv(data_rec, RECV_SIZE);
+    packet_len = tcp_socket->recv(data_rec, RECV_SIZE);
 
-    pack_len -= 4;
+    packet_len -= 4;
 
   // Check for valid packet.
   if (packet_len < 0) packet_len = 0;
