@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2015, 2016, 2020
- * Ivan P. Ucherdzhiev  <ivanucherdjiev@gmail.com> (Initial Autor)
- * Mathieu Le Dimna <mathieu-ledimna@outlook.com> (Co-Author)
+ * * Mathieu Le Dimna <mathieu-ledimna@outlook.com> (Initial Autor)
+ * Ivan P. Ucherdzhiev  <ivanucherdjiev@gmail.com> (Co-Author)
  * All Rights Reserved
  */
  
@@ -23,12 +23,29 @@
 #include "sha1.h"
 #include "EthernetInterface.h"
 
-#define MAX_CONNECT_ATTEMPTS    3
-#define MAX_TIMEOUT             10
-#define MIN_BYTES_NETWORK       8
 #define RECV_SIZE               50000
 
 MySQL::MySQL(TCPSocket* sock):tcp_socket(sock){}
+
+int MySQL::connect(char* user, char* password){
+    int i = -1;
+    unsigned int count = 0;
+    int ret=0;
+    
+    if (tcp_socket!=NULL) {
+        read_packet();
+        parse_handshake_packet();
+        ret = send_authentication_packet(user, password);
+        return ret;
+    }
+
+    return 0;
+}
+
+void MySQL::disconnect()
+{
+	//tcp_echoclient_connection_close(); // Add here you function to close the connection with the server
+}
 
 TypeDef_Database* MySQL::recieve(void){
     TypeDef_Database* Database = NULL;
@@ -106,56 +123,8 @@ TypeDef_Database* MySQL::recieve(void){
     return Database;
 }
 
-int MySQL::readInt(uint8_t * packet, int offset, int size) {
-  int value = 0;
-
-  for(int i=0; i<size; i++) value |= packet[i+offset]<<(i*8);
-
-  return value;
-}
-
-int MySQL::readLenEncInt(uint8_t * packet, int offset) {
-  int value = 0;
-
-  if(packet[offset]<251) return packet[offset];
-  else if(packet[offset]==0xFC){
-      for(int i=0; i<2; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-  else if(packet[offset]==0xFD){
-      for(int i=0; i<3; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-  else if(packet[offset]==0xFE){
-      for(int i=0; i<8; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-
-  return value;
-}
-
-char* MySQL::readLenEncString(uint8_t * packet, int offset){
-    char* str = NULL;
-    int str_size = this->readLenEncInt(packet, offset);
-
-    str = (char*)malloc(sizeof(char)*(str_size+1));
-
-    if(packet[offset]<251) for(int i=0; i<str_size; i++) str[i] = packet[i+1+offset];
-    else if(packet[offset]==0xFC) for(int i=0; i<str_size; i++) str[i] = packet[i+3+offset];
-    else if(packet[offset]==0xFD) for(int i=0; i<str_size; i++) str[i] = packet[i+4+offset];
-    else if(packet[offset]==0xFE) for(int i=0; i<str_size; i++) str[i] = packet[i+9+offset];
-
-    str[str_size] = '\0';
-
-    return str;
-}
-
-int MySQL::getNewOffset(uint8_t * packet, int offset) {
-    int str_size = this->readLenEncInt(packet, offset);
-
-    if(packet[offset]<251) offset += 1+str_size;
-    else if(packet[offset]==0xFC) offset += 3+str_size;
-    else if(packet[offset]==0xFD) offset += 4+str_size;
-    else if(packet[offset]==0xFE) offset += 9+str_size;
-
-  return offset;
+int MySQL::mysql_write(char * message, uint16_t len) {
+	return tcp_socket->send((void*)message, len);
 }
 
 Packet_Type MySQL::identifyPacket(uint8_t* packet, int packet_length){
@@ -223,26 +192,6 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     free(packet);
 
     return Database;
-}
-
-void MySQL::printDatabase(TypeDef_Database* Database){
-
-    if(Database!=NULL){
-        TypeDef_Table* table = Database->table;
-
-        if(table!=NULL){
-            int nb_columns = Database->table->nb_columns;
-            int nb_rows = Database->table->nb_rows;
-
-            printf("Database : %s, Table : %s\r\n",Database->database,table->table);
-            for(int y=0; y<nb_rows; y++){
-                for(int x=0; x<nb_columns; x++){
-                    printf("\t%s : %s\r\n",table->columns[x],table->rows[x][y]);
-                }
-                printf("\r\n");
-            }
-        }
-    }
 }
 
 TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count){
@@ -407,6 +356,26 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     return Database;
 }
 
+void MySQL::printDatabase(TypeDef_Database* Database){
+
+    if(Database!=NULL){
+        TypeDef_Table* table = Database->table;
+
+        if(table!=NULL){
+            int nb_columns = Database->table->nb_columns;
+            int nb_rows = Database->table->nb_rows;
+
+            printf("Database : %s, Table : %s\r\n",Database->database,table->table);
+            for(int y=0; y<nb_rows; y++){
+                for(int x=0; x<nb_columns; x++){
+                    printf("\t%s : %s\r\n",table->columns[x],table->rows[x][y]);
+                }
+                printf("\r\n");
+            }
+        }
+    }
+}
+
 void MySQL::freeDatabase(TypeDef_Database* Database){
     if(Database!=NULL){
         TypeDef_Table* table = Database->table;
@@ -433,214 +402,6 @@ void MySQL::freeDatabase(TypeDef_Database* Database){
     }
 }
 
-/**
- * mysql_connect - Connect to MYSQL server
- *
- * This method make TCP connection with the MYSQL server and then 
- * make a handshake with the MYSQL database.
- *
- *
- * user       - pointer to the string with the user name
- * password       - pointer to the string with the password name
- *
- */
-int MySQL::connect(char* user, char* password){
-    int i = -1;
-    unsigned int count = 0;
-    int ret=0;
-    
-    if (tcp_socket!=NULL) {
-        read_packet();
-        parse_handshake_packet();
-        ret = send_authentication_packet(user, password);
-        free(server_version);
-        return ret;
-    }
-
-    return 0;
-}
-
-/**
- * Disconnect from the server.
- *
- * Terminates connection with the server. You must call mysql_connect()
- * to reconnect.
-*/
-void MySQL::disconnect()
-{
-	//tcp_echoclient_connection_close(); // Add here you function to close the connection with the server
-}
-
-/**
- * cmd_query - Execute a SQL statement
- *
- * This method executes the query specified as a character array that is
- * located in data memory. It copies the query to the local buffer then
- * calls the run_query() method to execute the query.
- *
- *
- *
- * query[in]       SQL statement (using normal memory access)
- *
- * Returns boolean - True = a result set is available for reading
-*/
-int MySQL::cmd_query(const char *query){
-    int i, g = 4;
-    int query_len = strlen(query);
-
-    if (buffer != NULL) free(buffer);
-    buffer = (unsigned char*)malloc(query_len+5);
-
-    memcpy(buffer, "\0", query_len + 5);
-    memcpy(&buffer[5], query, query_len);// Write query to packet
-
-    return run_query(query_len);// Send the query
-}
-
-/**
- * clear_ok_packet - clear last Ok packet (if present)
- *
- * This method reads the header and status to see if this is an Ok packet.
- * If it is, it reads the packet and discards it. This is useful for
- * processing result sets from stored procedures.
- *
- * Returns False if the packet was not an Ok packet.
-*/
-int MySQL::clear_ok_packet() {
-  int num = 0;
-
-  do {
-   // num = client.available();
-	  num = 1;
-    if (num > 0) {
-
-      //wait_for_client();
-      read_packet();
-      if (check_ok_packet() != 0) {
-        //parse_error_packet();
-        return 0;
-      }
-    }
-  } while (num > 0);
-  return 1;
-}
-
-/**
- * free_columns_buffer - Free memory allocated for column names
- *
- * This method frees the memory allocated during the get_columns()
- * method.
- *
- * NOTICE: Failing to call this method after calling get_columns()
- *         and consuming the column names, types, etc. will result
- *         in a memory leak. The size of the leak will depend on
- *         the size of the combined column names (bytes).
-*/
-void MySQL::free_columns_buffer() {
-	int f;
-	// clear the db name and table name
-	if(columns.db!=NULL) free(columns.db);
-	if(columns.table!=NULL) free(columns.table);
-	columns.db = NULL;
-	columns.table = NULL;
-  // clear the columns and data
-  for (int f = 0; f < MAX_FIELDS; f++) {
-    if (columns.fields[f] != NULL) {
-    	free(columns.fields[f]->name);
-    	free(columns.fields[f]);
-    }
-    columns.fields[f] = NULL;
-  }
-  num_cols = 0;
-  columns_read = 0;
-}
-/**
- * get_columns - Get a list of the columns (fields)
- *
- * This method returns an instance of the column_names structure
- * that contains an array of fields.
- *
- * Note: you should call free_columns_buffer() after consuming
- *       the field data to free memory.
-*/
-column_names* MySQL::get_columns() {
-	char name[30];
-	int i = 0;
-  free_columns_buffer();
-  num_cols = 0;
-  if (get_fields()) {
-    columns_read = 1;
-    return &columns;
-  }
-  else {
-    return NULL;
-  }
-}
-
-// Begin private methods
-
-/**
- * run_query - execute a query
- *
- * This method sends the query string to the server and waits for a
- * response. If the result is a result set, it returns true, if it is
- * an error, it processes the error packet. If it is an Ok packet, it parses the packet and
- * returns false.
- *
- * query_len[in]   Number of bytes in the query string
- *
- * Returns boolean - true = result set available,
- *                   false = no result set returned.
-*/
-int MySQL::run_query(int query_len){
-    unsigned int count = 0;
-
-    //Set the first 3 bytes of the packet as the payload length (int<3>)
-    store_int(buffer, query_len+1, 3);
-    
-    buffer[3] = 0x00;//Sequence ID to 0 (Initiator)
-    buffer[4] = 0x03;//0x03 : command packet
-
-    //Send the query
-    mysql_write((char*)buffer,query_len + 5);
-
-    read_packet();//Read a response packet and stores it into buffer
-
-    int res = check_ok_packet();//Check if it's an ok packet
-
-    if ((res==ERROR_PACKET)||(pack_len<=0)) return 0;//Return 0 if not valid
-    
-    columns_read = 0;//Not an Ok packet, so we now have the result set to process.
-    return 1;
-}
-
-/**
- * send_authentication_packet - Send the response to the server's challenge
- *
- * This method builds a response packet used to respond to the server's
- * challenge packet (called the handshake packet). It includes the user
- * name and password scrambled using the SHA1 seed from the handshake
- * packet. It also sets the character set (default is 8 which you can
- * change to meet your needs).
- *
- * Note: you can also set the default database in this packet. See
- *       the code before for a comment on where this happens.
- *
- * The authentication packet is defined as follows.
- *
- * Bytes                        Name
- * -----                        ----
- * 4                            client_flags
- * 4                            max_packet_size
- * 1                            charset_number
- * 23                           (filler) al definedways 0x00...
- * n (Null-Terminated String)   user
- * n (Length Coded Binary)      scramble_buff (1 + x bytes)
- * n (Null-Terminated String)   databasename (optional
- *
- * user[in]        User name
- * password[in]    password
-*/
 int MySQL::send_authentication_packet(char *user, char *password)
 {
 	int status = 0;
@@ -718,20 +479,6 @@ int MySQL::send_authentication_packet(char *user, char *password)
   return status;
 }
 
-
-/**
- * scramble_password - Build a SHA1 scramble of the user password
- *
- * This method uses the password hash seed sent from the server to
- * form a SHA1 hash of the password. This is used to send back to
- * the server to complete the challenge and response step in the
- * authentication handshake.
- *
- * password[in]    User's password in clear text
- * pwd_hash[in]    Seed from the server
- *
- * Returns boolean - True = scramble succeeded
-*/
 int MySQL::scramble_password(char *password, uint8_t *pwd_hash) {
 	SHA1Context sha;
   int i = 0;
@@ -813,24 +560,10 @@ int MySQL::scramble_password(char *password, uint8_t *pwd_hash) {
   return 1;
 }
 
-
-/**
- * read_packet - Read a packet from the server and store it in the buffer
- *
- * This method reads the bytes sent by the server as a packet. All packets
- * have a packet header defined as follows.
- *
- * Bytes                 Name
- * -----                 ----
- * 3                     Packet Length
- * 1                     Packet Number
- *
- * Thus, the length of the packet (not including the packet header) can
- * be found by reading the first 4 bytes from the server then reading
- * N bytes for the packet payload.
-*/
 void MySQL::read_packet() {
+  uint8_t *data_rec = NULL;
   uint8_t local[4];
+  int packet_len = 0;
   int i = 0;
 
   if (buffer != NULL) {
@@ -840,7 +573,7 @@ void MySQL::read_packet() {
     data_rec = (uint8_t*)malloc(RECV_SIZE);
     pack_len = tcp_socket->recv(data_rec, RECV_SIZE);
 
-    packet_len = pack_len - 4;
+    pack_len -= 4;
 
   // Check for valid packet.
   if (packet_len < 0) packet_len = 0;
@@ -858,57 +591,6 @@ void MySQL::read_packet() {
   data_rec = NULL;
 }
 
-void MySQL::read_packet_limit() {
-  uint8_t local[4];
-  int i = 0;
-
-  if (buffer != NULL)
-  {
-	  memset( buffer, '\0', sizeof(*buffer) );
-	  free(buffer);
-	  buffer = NULL;
-  }
-
-  packet_len = pack_len-4;
-
-  // Check for valid packet.
-  if (packet_len < 0) packet_len = 0;
-  buffer = (unsigned char*)malloc(packet_len+4);
-  
-  if (buffer == NULL) return;
-
-  for (int i = 0; i < 4; i++) buffer[i] = local[i];
-  for (int i = 4; i < packet_len+4; i++) buffer[i] = data_rec[i];
-
-  memset( data_rec, '\0', sizeof(*data_rec) );
-  free(data_rec);
-  data_rec = NULL;
-}
-
-/**
- * parse_handshake_packet - Decipher the server's challenge data
- *
- * This method reads the server version string and the seed from the
- * server. The handshake packet is defined as follows.
- *
- *  Bytes                        Name
- *  -----                        ----
- *  1                            protocol_version
- *  n (Null-Terminated String)   server_version
- *  4                            thread_id
- *  8                            scramble_buff
- *  1                            (filler) always 0x00
- *  2                            server_capabilities
- *  1                            server_language
- *  2                            server_status
- *  2                            server capabilities (two upper bytes)
- *  1                            length of the scramble seed
- * 10                            (filler)  always 0
- *  n                            rest of the plugin provided data
- *                               (at least 12 bytes)
- *  1                            \0 byte, terminating the second part of
- *                                a scramble seed
-*/
 void MySQL::parse_handshake_packet() {
 
 	int j = 0;
@@ -916,9 +598,6 @@ void MySQL::parse_handshake_packet() {
   do {
     i++;
   } while (buffer[i-1] != 0x00);
-
-  server_version = (char*)malloc(i-5);
-  strncpy(server_version, (char *)&buffer[5], i-5);
 
   // Capture the first 8 characters of seed
   i += 4; // Skip thread id
@@ -931,23 +610,6 @@ void MySQL::parse_handshake_packet() {
     seed[j+8] = buffer[i+j];
 }
 
-/**
- * check_ok_packet - Decipher an Ok packet from the server.
- *
- * This method attempts to parse an Ok packet. If the packet is not an
- * Ok, packet, it returns the packet type.
- *
- *  Bytes                       Name
- *  -----                       ----
- *  1   (Length Coded Binary)   field_count, always = 0
- *  1-9 (Length Coded Binary)   affected_rows
- *  1-9 (Length Coded Binary)   insert_id
- *  2                           server_status
- *  2                           warning_count
- *  n   (until end of packet)   message
- *
- * Returns integer - 0 = successful parse, packet type if not an Ok packet
-*/
 int MySQL::check_ok_packet() {
   int type = buffer[4];
   if (type != OK_PACKET)
@@ -955,17 +617,17 @@ int MySQL::check_ok_packet() {
   return 0;
 }
 
+int MySQL::getNewOffset(uint8_t * packet, int offset) {
+    int str_size = this->readLenEncInt(packet, offset);
 
-/**
- * get_lcb_len - Retrieves the length of a length coded binary value
- *
- * This reads the first byte from the offset into the buffer and returns
- * the number of bytes (size) that the integer consumes. It is used in
- * conjunction with read_int() to read length coded binary integers
- * from the buffer.
- *
- * Returns integer - number of bytes integer consumes
-*/
+    if(packet[offset]<251) offset += 1+str_size;
+    else if(packet[offset]==0xFC) offset += 3+str_size;
+    else if(packet[offset]==0xFD) offset += 4+str_size;
+    else if(packet[offset]==0xFE) offset += 9+str_size;
+
+  return offset;
+}
+
 int MySQL::get_lcb_len(int offset) {
   int read_len = buffer[offset];
   if (read_len > 250) {
@@ -981,16 +643,6 @@ int MySQL::get_lcb_len(int offset) {
   return read_len;
 }
 
-/**
- * read_string - Retrieve a string from the buffer
- *
- * This reads a string from the buffer. It reads the length of the string
- * as the first byte.
- *
- * offset[in]      offset from start of buffer
- *
- * Returns string - String from the buffer
-*/
 char* MySQL::read_string(int *offset){
     int len = get_lcb_len(*offset);
     char *str = NULL;
@@ -1005,17 +657,6 @@ char* MySQL::read_string(int *offset){
     return str;
 }
 
-/**
- * read_int - Retrieve an integer from the buffer in size bytes.
- *
- * This reads an integer from the buffer at offset position indicated for
- * the number of bytes specified (size).
- *
- * offset[in]      offset from start of buffer
- * size[in]        number of bytes to use to store the integer
- *
- * Returns integer - integer from the buffer
-*/
 int MySQL::read_int(int offset, int size){
   int value = 0;
   int new_size = 0;
@@ -1036,19 +677,47 @@ int MySQL::read_int(int offset, int size){
   return value;
 }
 
+int MySQL::readInt(uint8_t * packet, int offset, int size) {
+  int value = 0;
 
-/**
- * store_int - Store an integer value into a byte array of size bytes.
- *
- * This writes an integer into the buffer at the current position of the
- * buffer. It will transform an integer of size to a length coded binary
- * form where 1-3 bytes are used to store the value (set by size).
- *
- * buff[in]        pointer to location in internal buffer where the
- *                 integer will be stored
- * value[in]       integer value to be stored
- * size[in]        number of bytes to use to store the integer
-*/
+  for(int i=0; i<size; i++) value |= packet[i+offset]<<(i*8);
+
+  return value;
+}
+
+int MySQL::readLenEncInt(uint8_t * packet, int offset) {
+  int value = 0;
+
+  if(packet[offset]<251) return packet[offset];
+  else if(packet[offset]==0xFC){
+      for(int i=0; i<2; i++) value |= packet[i+1+offset]<<(i*8);
+  }
+  else if(packet[offset]==0xFD){
+      for(int i=0; i<3; i++) value |= packet[i+1+offset]<<(i*8);
+  }
+  else if(packet[offset]==0xFE){
+      for(int i=0; i<8; i++) value |= packet[i+1+offset]<<(i*8);
+  }
+
+  return value;
+}
+
+char* MySQL::readLenEncString(uint8_t * packet, int offset){
+    char* str = NULL;
+    int str_size = this->readLenEncInt(packet, offset);
+
+    str = (char*)malloc(sizeof(char)*(str_size+1));
+
+    if(packet[offset]<251) for(int i=0; i<str_size; i++) str[i] = packet[i+1+offset];
+    else if(packet[offset]==0xFC) for(int i=0; i<str_size; i++) str[i] = packet[i+3+offset];
+    else if(packet[offset]==0xFD) for(int i=0; i<str_size; i++) str[i] = packet[i+4+offset];
+    else if(packet[offset]==0xFE) for(int i=0; i<str_size; i++) str[i] = packet[i+9+offset];
+
+    str[str_size] = '\0';
+
+    return str;
+}
+
 void MySQL::store_int(uint8_t *buff, long value, int size){
     memset(buff, 0, size);
     if (value < 0xff)
@@ -1066,96 +735,4 @@ void MySQL::store_int(uint8_t *buff, long value, int size){
         buff[2] = (uint8_t)(value >> 16);
         buff[3] = (uint8_t)(value >> 24);
     }
-}
-
-
-/**
- * get_fields - reads the fields from the read buffer
- *
- * This method is used to read the field names, types, etc.
- * from the read buffer and store them in the columns structure
- * in the class.
- *
-*/
-int MySQL::get_fields(){
-    int num_fields = 0, f , offset = 13, len_bytes;
-
-    if (buffer == NULL) return 0;
-
-    num_fields = buffer[4];//Column count
-    columns.num_fields = num_fields;
-    num_cols = num_fields; // Save this for later use
-
-
-    len_bytes = get_lcb_len(offset);
-    columns.db = read_string(&offset);
-    // get table
-    offset += len_bytes + 1;
-    columns.table = read_string(&offset);
-
-    for (int f = 0; f < num_fields; f++) {
-        field_struct *field = (field_struct *)malloc(sizeof(field_struct));
-
-        len_bytes = get_lcb_len(offset);
-        offset += (len_bytes+ 1) * 2;
-        field->name = read_string(&offset);
-        len_bytes = get_lcb_len(offset);
-        offset += (len_bytes+ 1) * 2;
-
-        if((f+1) != num_fields){
-            offset += 21;
-            len_bytes = get_lcb_len(offset);
-            offset += len_bytes + 1;
-        }
-        columns.fields[f] = field;
-    }
-    columns_read = 1;
-    get_row_values( &offset);
-    return 1;
-}
-
-
-/**
- * get_row_values - reads the row values from the read buffer
- *
- * This method is used to read the row column values
- * from the read buffer and store them in the row structure
- * in the class.
- *
-*/
-int MySQL::get_row_values( int *off) {
-    int res = 0;
-    int offset = *off + 26;
-    int f;
-    int len_bytes;
-    // It is an error to try to read rows before columns
-    // are read.
-    if (!columns_read) {
-        return EOF_PACKET;
-    }
-    for (int f = 0; f < num_cols; f++) {
-        if(buffer[offset]!=0xFE){//If packet is not a EOF_Packet
-            len_bytes = get_lcb_len(offset);
-            columns.fields[f]->data = read_string(&offset);
-            offset += len_bytes+ 1;
-        }
-        else columns.fields[f]->data = NULL;
-    }
-
-    return 1;
-}
-
-
-/* Function which send the query by existing tcp socket*/
-/* here this function can be modified by your own send function*/
-int MySQL::mysql_write(char * message, uint16_t len) {
-	return tcp_socket->send((void*)message, len);
-}
-
-int MySQL::getBuffer(uint8_t* ext_buffer){
-    if(ext_buffer!=NULL) free(ext_buffer);
-    ext_buffer = (uint8_t*)malloc(packet_len+4);
-    for(int i=0; i<pack_len+4; i++) ext_buffer[i] = buffer[i];
-
-    return ((int)pack_len+4);
 }

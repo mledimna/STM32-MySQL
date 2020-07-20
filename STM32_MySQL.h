@@ -89,83 +89,34 @@ char *values[MAX_FIELDS];
 class MySQL{
     public:
     MySQL(TCPSocket* sock);
-
     int connect(char* user, char* password);
     void disconnect();
-
-    int cmd_query(const char *query);
-    column_names *get_columns();
-
-    /*
-    NEW FUNCTIONS :
-        -Dynamic allocation
-        -Thread Safe
-    */
     TypeDef_Database* query(const char *pQuery, TypeDef_Database* Database);
+    void printDatabase(TypeDef_Database* Database);
+    
+    private:
+    TCPSocket* tcp_socket = NULL;
+    unsigned char *buffer = NULL;
+    uint8_t seed[20] = {0};
+
     TypeDef_Database* recieve(void);
-
-    int readInt(uint8_t * packet, int offset, int size);
-    int readLenEncInt(uint8_t * packet, int offset);
-    char* readLenEncString(uint8_t * packet, int offset);
-    int getNewOffset(uint8_t * packet, int offset);
-
+    int mysql_write(char * message, uint16_t len);
     Packet_Type identifyPacket(uint8_t* packet, int packet_length);
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
     void freeDatabase(TypeDef_Database* Database);
-
-    void printDatabase(TypeDef_Database* Database);
-
-    /*
-    END NEW FUNCTIONS
-    */
-
-    int getBuffer(uint8_t* ext_buffer);
-
-    private:
-    TCPSocket* tcp_socket = NULL;
-    unsigned int tries = 0;
-    unsigned char *buffer = NULL;
-    char *server_version = NULL;
-    uint8_t seed[20] = {0};
-    int packet_len = 0;
-
-    column_names columns = {0};
-    int columns_read = 0;
-    int num_cols = 0;
-
-    /* extern varibles which comes from the packet receiving source*/
-    uint8_t *data_rec = 0; // pointer to the received data from MYSQL server
-    unsigned short int pack_rec = 0; // Varible which indicate is packet received
-    unsigned int pack_len = 0; // varible which indicate the lent of the received packet from MYSQL server
-
-    int cmd_query_P(const char *query);
-    int mysql_write(char * message, uint16_t len);
-    void read_packet_limit();
-
-    row_values *get_next_row();
-    void free_columns_buffer();
-    void free_row_buffer();
-    void show_results();
-    int clear_ok_packet();
-
-    // Methods for handling packets
     int send_authentication_packet(char *user, char *password);
+    int scramble_password(char *password, uint8_t *pwd_hash);
     void read_packet();
     void parse_handshake_packet();
     int check_ok_packet();
-    int run_query(int query_len);
-
-    // Utility methods
-    int scramble_password(char *password, uint8_t *pwd_hash);
+    int getNewOffset(uint8_t * packet, int offset);
     int get_lcb_len(int offset);
-    int read_int(int offset, int size);
-    void store_int(uint8_t *buff, long value, int size);
-
     char *read_string(int *offset);
-    int get_field(field_struct *fs, int *off);
-    int get_fields();
-    int get_row_values( int *off);
-    void do_query(const char *q);
+    int read_int(int offset, int size);
+    int readInt(uint8_t * packet, int offset, int size);
+    int readLenEncInt(uint8_t * packet, int offset);
+    char* readLenEncString(uint8_t * packet, int offset);
+    void store_int(uint8_t *buff, long value, int size);
 };
 
 #endif
