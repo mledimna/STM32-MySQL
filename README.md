@@ -1,4 +1,4 @@
-# STM32-MySQL
+# STM32-MySQL mbed
 MySQL Client for STM32 using mbed library
 
 # How to use this code ?
