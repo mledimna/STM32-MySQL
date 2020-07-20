@@ -101,8 +101,8 @@ class MySQL{
         -Dynamic allocation
         -Thread Safe
     */
-    int query(const char* query);
-    bool recieve(void);
+    TypeDef_Database* query(const char *pQuery, TypeDef_Database* Database);
+    TypeDef_Database* recieve(void);
 
     int readInt(uint8_t * packet, int offset, int size);
     int readLenEncInt(uint8_t * packet, int offset);
@@ -111,6 +111,10 @@ class MySQL{
 
     Packet_Type identifyPacket(uint8_t* packet, int packet_length);
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
+    void freeDatabase(TypeDef_Database* Database);
+
+    void printDatabase(TypeDef_Database* Database);
+
     /*
     END NEW FUNCTIONS
     */
