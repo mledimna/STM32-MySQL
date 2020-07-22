@@ -25,7 +25,16 @@
 
 #define RECV_SIZE               50000
 
-MySQL::MySQL(TCPSocket* sock):tcp_socket(sock){}
+MySQL::MySQL(NetworkInterface* pNetworkInterface, const char* server_ip):mNetworkInterface(pNetworkInterface){
+    SocketAddress server;
+    tcp_socket = new TCPSocket();
+
+    tcp_socket->open(mNetworkInterface);
+    server.set_ip_address(server_ip);
+    server.set_port(3306);
+    tcp_socket->set_timeout(1000);
+    tcp_socket->connect(server);
+}
 
 int MySQL::connect(char* user, char* password){
     int i = -1;

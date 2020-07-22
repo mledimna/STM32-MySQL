@@ -24,56 +24,60 @@ To compile and flash this code I used [Mbed Studio](https://os.mbed.com/studio/)
 #include "STM32_MySQL.h"
 
 int main(void){
-    EthernetInterface eth;
-    TCPSocket sock;
+	const char* device_ip =	"Your STM32 IP";
+	const char* server_ip =	"Your MySQL Server IP";
+	const char* gateway =	"Your Gateway IP";
+	const char* netmask =	"Your Netmask";
 
-    SocketAddress ip;
-    SocketAddress server;
+	char* mysql_user = 	"Your Username";
+	char* mysql_password = 	"Your Password";
 
-    const char* device_ip = "Your STM32 IP";
-    const char* server_ip = "Your SQL server IP";
-    const char* gateway = "Your gateway";
-    const char* netmask = "Your getmask";
-    const int mysql_port = 3306;
-    char* mysql_user = (char*)"Your user";
-    char* mysql_password = (char*)"Your password";
+	EthernetInterface eth;
 
-    eth.set_dhcp(false);
-    eth.set_network(device_ip, netmask, gateway);
-    eth.connect();
-    sock.open(&eth);
-    server.set_ip_address(server_ip);
-    server.set_port(mysql_port);
-    sock.set_timeout(1000);
-    sock.connect(server);
-    
-    MySQL sql(&sock);
+	//Network Configuration
+	eth.set_dhcp(false);
+	eth.set_network(device_ip, netmask, gateway);
+	eth.connect();
 
-    sql.connect(mysql_user, mysql_password);
+	//MySQL Object declaration
+	MySQL sql(&eth, server_ip);
 
-    TypeDef_Database* Database = NULL;
+	sql.connect(mysql_user, mysql_password);
 
-    while(true){
-        Database = sql.query("SELECT * FROM database.table;",Database);
-        if(Database==NULL) printf("Error : Database NULL after query\r\n");
-        else sql.printDatabase(Database);
+	TypeDef_Database* Database = NULL;
 
-        ThisThread::sleep_for(5s);
-    }
-    return 0;
+	while(true){
+		//Get Table from Database
+		Database = sql.query("SELECT * FROM database.table;",Database);
+
+		//Print database over serial if something has been received
+		if(Database!=NULL) sql.printDatabase(Database);
+
+		//Make a simple query, if the query is OK, it returns true
+		if(sql.query("INSERT INTO database.table VALUES(Your values);")){
+			printf("Query OK !\r\n");
+		}
+
+		//Sleep for 5 seconds
+		ThisThread::sleep_for(5s);
+	}
 }
 ```
 ## Edit
 ### Configure the constants
 ```C++
-const char* device_ip = "Your STM32 IP";
-const char* server_ip = "Your SQL server IP";
-const char* gateway = "Your gateway";
-const char* netmask = "Your getmask";
-char* mysql_user = (char*)"Your user";
-char* mysql_password = (char*)"Your password";
+const char* device_ip =	"Your STM32 IP";
+const char* server_ip =	"Your MySQL Server IP";
+const char* gateway =	"Your Gateway IP";
+const char* netmask =	"Your Netmask";
+
+char* mysql_user = 	"Your Username";
+char* mysql_password = 	"Your Password";
 ```
-### Run query with your own database name and table
+### Run query
 ```C++
 Database = sql.query("SELECT * FROM database.table;",Database);
+```
+```C++
+sql.query("INSERT INTO database.table VALUES(Your values);")
 ```
