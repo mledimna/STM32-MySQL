@@ -91,7 +91,10 @@ class MySQL{
     MySQL(TCPSocket* sock);
     int connect(char* user, char* password);
     void disconnect();
+
     TypeDef_Database* query(const char *pQuery, TypeDef_Database* Database);
+    bool query(const char *pQuery);
+    
     void printDatabase(TypeDef_Database* Database);
     
     private:
@@ -99,10 +102,11 @@ class MySQL{
     unsigned char *buffer = NULL;
     uint8_t seed[20] = {0};
 
-    TypeDef_Database* recieve(void);
+    uint8_t** recieve(int* packets_count);
     int mysql_write(char * message, uint16_t len);
     Packet_Type identifyPacket(uint8_t* packet, int packet_length);
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
+    void freeRecievedPackets(uint8_t** packets_received, int* packets_count);
     void freeDatabase(TypeDef_Database* Database);
     int send_authentication_packet(char *user, char *password);
     int scramble_password(char *password, uint8_t *pwd_hash);

@@ -47,17 +47,16 @@ void MySQL::disconnect()
 	//tcp_echoclient_connection_close(); // Add here you function to close the connection with the server
 }
 
-TypeDef_Database* MySQL::recieve(void){
+uint8_t** MySQL::recieve(int* packets_count){
     TypeDef_Database* Database = NULL;
 
     int data_recieved_length = 0; //Packet Length
     uint8_t* data_recieved = NULL; //Used to store recieved MySQL server response
 
-    int packets_count = 0; //Number of received packets
-    uint8_t** packets_received = NULL; //Table to store the received packets
-
     uint8_t data = 0x00; //Buffer for recieved data
     nsapi_size_or_error_t ret = 0; //Socket return type to check if there was something to read or if an error occured
+
+    uint8_t** packets_recieved = NULL;
 
     //To avoid blocking the actual thread, set the recieve timeout to 1000ms
     tcp_socket->set_timeout(1000);
@@ -92,35 +91,28 @@ TypeDef_Database* MySQL::recieve(void){
     //Parse the received block into packets
     for(int offset=0; offset<data_recieved_length; offset+=4+payload_len){
         
-        packets_count++;//Increment the number of packets received
+        (*packets_count)++;//Increment the number of packets received
         payload_len = this->readInt(data_recieved, offset, 3);//Read the actual packet payload length
 
         //Use malloc for the first packet, the use realloc
-        if(offset==0)packets_received = (uint8_t**)malloc(sizeof(uint8_t*));
-        else packets_received = (uint8_t**)realloc(packets_received,sizeof(uint8_t*)*packets_count);
+        if(offset==0)packets_recieved = (uint8_t**)malloc(sizeof(uint8_t*));
+        else packets_recieved = (uint8_t**)realloc(packets_recieved,sizeof(uint8_t*)*(*packets_count));
 
         //Allocate enought memory to store the packet data
-        if(packets_received!=NULL) packets_received[packets_count-1] = (uint8_t*)malloc(sizeof(uint8_t)*(payload_len+4));
+        if(packets_recieved!=NULL) packets_recieved[(*packets_count)-1] = (uint8_t*)malloc(sizeof(uint8_t)*(payload_len+4));
         else {
             printf("Memory allocation error...\r\n");
             return NULL;
         }
 
         //Attribute actual values to the allocated packet
-        for(int i=0; i<payload_len+4; i++) packets_received[packets_count-1][i] = data_recieved[offset+i];
+        for(int i=0; i<payload_len+4; i++) packets_recieved[(*packets_count)-1][i] = data_recieved[offset+i];
     }
 
     //To avoid opening another thread on https://stackoverflow.com/
-    free(data_recieved);    
+    free(data_recieved);
 
-    Database = this->parseTable(packets_received,packets_count);
-
-    //To avoid opening another thread on https://stackoverflow.com/
-    for(int i=0; i<packets_count; i++) free(packets_received[i]);
-    free(packets_received);
-
-    //No error, something available
-    return Database;
+    return packets_recieved;
 }
 
 int MySQL::mysql_write(char * message, uint16_t len) {
@@ -156,6 +148,10 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     char * packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
+
+    uint8_t** packets_received = NULL;
+    int packets_count = 0;
+
     int ret = 0;
 
     /*
@@ -184,14 +180,85 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     ret = this->mysql_write(packet,packet_len);
 
     //Receive results
-    Database = this->recieve();
+    packets_received = this->recieve(&packets_count);
 
-    //this->printDatabase(Database);
+    Database = this->parseTable(packets_received,packets_count);
+
+    this->freeRecievedPackets(packets_received,&packets_count);
 
     //To avoid opening another thread on https://stackoverflow.com/
     free(packet);
 
     return Database;
+}
+
+void MySQL::freeRecievedPackets(uint8_t** packets_received, int* packets_count){
+    //To avoid opening another thread on https://stackoverflow.com/
+    for(int i=0; i<(*packets_count); i++) free(packets_received[i]);
+    free(packets_received);
+    *packets_count = 0;
+}
+
+bool MySQL::query(const char *pQuery){
+    char * packet = NULL;
+    int packet_len = 0;
+    int payload_len = 0;
+    int ret = 0;
+
+    uint8_t** packets_received = NULL;
+    int packets_count = 0;
+
+    payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
+    packet_len = payload_len+4; //Header + Payload length
+
+    packet = (char*)malloc(packet_len); //Allocate memory for the packet
+
+    this->store_int((uint8_t*)packet, payload_len, 3);
+
+    packet[3] = 0x00; //Sequence ID : Initiator
+    packet[4] = 0x03; //Set flag to COM_QUERY
+    
+    //Insert query into packet
+    for(int i=0; i<strlen(pQuery); i++) packet[i+5] = pQuery[i];
+    
+    //Send the query
+    ret = this->mysql_write(packet,packet_len);
+
+    //To avoid opening another thread on https://stackoverflow.com/
+    free(packet);
+
+    //Receive results
+    packets_received = this->recieve(&packets_count);
+
+    if(packets_received==NULL) return false;
+    
+    packet_len = this->readInt(packets_received[0], 0, 3)+4;
+    uint8_t packet_type = this->identifyPacket(packets_received[0], this->readInt(packets_received[0], 0, 3)+4);
+
+    if(packet_type==PACKET_OK) {
+        //To avoid opening another thread on https://stackoverflow.com/
+        this->freeRecievedPackets(packets_received, &packets_count);
+
+        return true;
+    }
+    else if(packet_type==PACKET_ERR) {
+        char* str = NULL;
+        str = this->readLenEncString(packets_received[0], 12);
+        printf("%s\r\n",str);
+        free(str);
+
+        //To avoid opening another thread on https://stackoverflow.com/
+        this->freeRecievedPackets(packets_received, &packets_count);
+
+        return false;
+    }
+    else{
+        //To avoid opening another thread on https://stackoverflow.com/
+        this->freeRecievedPackets(packets_received, &packets_count);
+
+        return false;
+    }
+    return false;
 }
 
 TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count){
