@@ -25,35 +25,72 @@
 
 #define RECV_SIZE               50000
 
-MySQL::MySQL(NetworkInterface* pNetworkInterface, const char* server_ip):mNetworkInterface(pNetworkInterface){
-    SocketAddress server;
-    tcp_socket = new TCPSocket();
+MySQL::MySQL(NetworkInterface* pNetworkInterface, const char* server_ip):mNetworkInterface(pNetworkInterface),server_ip(server_ip){}
 
-    tcp_socket->open(mNetworkInterface);
-    server.set_ip_address(server_ip);
-    server.set_port(3306);
-    tcp_socket->set_timeout(1000);
-    tcp_socket->connect(server);
+MySQL::~MySQL(void){
+    //Close MySQL Session
+    this->disconnect();
+
+    //Close TCP Socket connection
+    tcp_socket->close();
+
+    //delete TCP Socket object
+    delete tcp_socket;
+
+    //free buffer if not NULL
+    if(buffer != NULL) free(buffer);
 }
 
-int MySQL::connect(char* user, char* password){
-    int i = -1;
-    unsigned int count = 0;
-    int ret=0;
+bool MySQL::connect(char* user, char* password){
+    bool ret = false;
+    SocketAddress server;
+
+    //Delete TCPSocket if not NULL
+    delete tcp_socket;
+
+    //Create TCP Socket
+    tcp_socket = new TCPSocket();
+    if(tcp_socket==NULL) return false;
+
+    //Set up TCP socket
+    if(tcp_socket->open(mNetworkInterface)!=0) return false;
     
-    if (tcp_socket!=NULL) {
+    //Set MySQL server IP
+    if(!server.set_ip_address(server_ip)) return false;
+    
+    //Set MySQL server port number
+    server.set_port(3306);
+    
+    //Set socket Timeout
+    tcp_socket->set_timeout(1000);
+    
+    //Connect to server
+    if(tcp_socket->connect(server)!=0) return false;
+    
+
+    if (tcp_socket != NULL) {
+        //Read hadshake packet
         read_packet();
+
+        //Parse packet
         parse_handshake_packet();
-        ret = send_authentication_packet(user, password);
+        
+        //Send authentification to server
+        ret = (send_authentication_packet(user, password)>0)?true:false;
+
         return ret;
     }
-
-    return 0;
+    return false;
 }
 
-void MySQL::disconnect()
+bool MySQL::disconnect()
 {
-	//tcp_echoclient_connection_close(); // Add here you function to close the connection with the server
+    uint8_t COM_QUIT[] = {0x01,0x00,0x00,0x00,0x01};
+
+    //Send COM_QUIT packet (Payload : 0x01)
+	if(this->mysql_write((char*)COM_QUIT, 5)>0) return true;
+
+    return false;
 }
 
 uint8_t** MySQL::recieve(int* packets_count){
@@ -125,6 +162,7 @@ uint8_t** MySQL::recieve(int* packets_count){
 }
 
 int MySQL::mysql_write(char * message, uint16_t len) {
+    //Send raw data to socket
 	return tcp_socket->send((void*)message, len);
 }
 
@@ -163,22 +201,19 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
 
     int ret = 0;
 
-    /*
-    COM_QUERY : 
-        The SQL packet length is :
-            -4 bytes : Header (Payload length<3> + Sequence ID<1>)
-            -1 byte : 0x03 (COM_QUERY Flag<1>)
-            -n byte(s) : Query length<n>
-    */
+    //Free database struct pointer if not NULL
     if(Database!=NULL) this->freeDatabase(Database);
 
     payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
     packet_len = payload_len+4; //Header + Payload length
 
-    packet = (char*)malloc(packet_len); //Allocate memory for the packet
+    //Allocate memory for the packet
+    packet = (char*)malloc(packet_len);
 
+    //Set 3 first bytes as the payload length
     this->store_int((uint8_t*)packet, payload_len, 3);
 
+    //Edit protocol related bytes
     packet[3] = 0x00; //Sequence ID : Initiator
     packet[4] = 0x03; //Set flag to COM_QUERY
     
@@ -191,8 +226,10 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     //Receive results
     packets_received = this->recieve(&packets_count);
 
+    //Convert raw packets into Database struct
     Database = this->parseTable(packets_received,packets_count);
 
+    //Free raw packets
     this->freeRecievedPackets(packets_received,&packets_count);
 
     //To avoid opening another thread on https://stackoverflow.com/
@@ -202,9 +239,13 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
 }
 
 void MySQL::freeRecievedPackets(uint8_t** packets_received, int* packets_count){
-    //To avoid opening another thread on https://stackoverflow.com/
+    //Free each 'strings' of packet
     for(int i=0; i<(*packets_count); i++) free(packets_received[i]);
+    
+    //Free head of strings
     free(packets_received);
+
+    //Reset packet count
     *packets_count = 0;
 }
 
@@ -214,7 +255,9 @@ bool MySQL::query(const char *pQuery){
     int payload_len = 0;
     int ret = 0;
 
+    //Table of tables of packets
     uint8_t** packets_received = NULL;
+    //Number of tables of packets in table of tables of packets :)
     int packets_count = 0;
 
     payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
@@ -394,6 +437,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     //Row parsing
     type = PACKET_UNKNOWN;
 
+    //Allocate 3D array (first dimension is columns)
     Database->table->rows = (char***)malloc(sizeof(char**)*Database->table->nb_columns);
     if(Database->table->rows==NULL){
         this->freeDatabase(Database);
@@ -403,29 +447,39 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     for(int i=packet_offset; type==PACKET_UNKNOWN; i++){
         int offset = 4;
         int payload_size = this->readInt(packets_received[i],0,3);
-        int nb_rows = (i+1)-packet_offset; //Increment the number of packets
 
-        Database->table->nb_rows = nb_rows;
+        int nb_rows = (i+1)-packet_offset; //Increment the number of rows
 
         //Get row values
         for(int j=0; j<Database->table->nb_columns; j++){
+
+            //Allocate 3D array (Second dimension is rows)
             if(nb_rows==1) Database->table->rows[j] = (char**)malloc(sizeof(char*));
             else Database->table->rows[j] = (char**)realloc(Database->table->rows[j],sizeof(char*)*nb_rows);
 
+            //Check allocation integrity
             if(Database->table->rows[j]==NULL){
                 this->freeDatabase(Database);
                 return NULL;
             }
 
+            //Allocate 3D array (Third dimension is strings)
             Database->table->rows[j][nb_rows-1] = this->readLenEncString(packets_received[i], offset);
             
+            //Check allocation integrity
             if(Database->table->rows[j][nb_rows-1]==NULL){
                 this->freeDatabase(Database);
                 return NULL;
             }
 
+            //Increment offset
             offset = this->getNewOffset(packets_received[i],offset);
         }
+
+        //Increment number of rows
+        Database->table->nb_rows = nb_rows;
+
+        //To check if next packet is EOF_PACKET (end of loop)
         type = this->identifyPacket(packets_received[i+1], payload_size+4);
     }
 
@@ -441,7 +495,9 @@ void MySQL::printDatabase(TypeDef_Database* Database){
             int nb_columns = Database->table->nb_columns;
             int nb_rows = Database->table->nb_rows;
 
+            //Print Database name and selected table name
             printf("Database : %s, Table : %s\r\n",Database->database,table->table);
+
             for(int y=0; y<nb_rows; y++){
                 for(int x=0; x<nb_columns; x++){
                     printf("\t%s : %s\r\n",table->columns[x],table->rows[x][y]);
@@ -462,18 +518,27 @@ void MySQL::freeDatabase(TypeDef_Database* Database){
 
             for(int x=0; x<nb_columns; x++){
                 for(int y=0; y<nb_rows; y++){
+                    //Free row values
                     free(table->rows[x][y]);
                 }
+                //free rows
                 free(table->rows[x]);
             }
+            //Free colums
             free(table->rows);
+
+            //Free table name
             free(table->table);
             table->nb_columns = 0;
             table->nb_rows = 0;
         }
+        //Free table struct pointer
         free(table);
 
+        //Free database name
         free(Database->database);
+
+        //Free database struct pointer
         free(Database);
     }
 }
@@ -694,6 +759,7 @@ int MySQL::check_ok_packet() {
 }
 
 int MySQL::getNewOffset(uint8_t * packet, int offset) {
+    //Reads the length encoded variable value to jump it
     int str_size = this->readLenEncInt(packet, offset);
 
     if(packet[offset]<251) offset += 1+str_size;

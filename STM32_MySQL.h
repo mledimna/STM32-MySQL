@@ -88,11 +88,12 @@ char *values[MAX_FIELDS];
 
 class MySQL{
     public:
-    MySQL(TCPSocket* sock);
     MySQL(NetworkInterface* pNetworkInterface, const char* server_ip);
+    ~MySQL(void);
+    
+    bool connect(char* user, char* password);
 
-    int connect(char* user, char* password);
-    void disconnect();
+    bool disconnect();
 
     TypeDef_Database* query(const char *pQuery, TypeDef_Database* Database);
     bool query(const char *pQuery);
@@ -102,6 +103,7 @@ class MySQL{
     private:
     NetworkInterface* mNetworkInterface = NULL;
     TCPSocket* tcp_socket = NULL;
+    const char* server_ip = NULL;
     unsigned char *buffer = NULL;
     uint8_t seed[20] = {0};
 
