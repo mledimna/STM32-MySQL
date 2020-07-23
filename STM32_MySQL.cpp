@@ -320,7 +320,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     int packet_offset = 0;//To keep track of which packet we are at
 
     //5 packets received minimum for a SELECT * FROM query :
-    if(packets_count<5) return NULL;
+    //if(packets_count<3) return NULL;
     if(packets_received==NULL) return NULL;
 
     //Allocate memory for database structure
@@ -330,6 +330,12 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     //Allocate memory for table structure
     Database->table = (TypeDef_Table*)malloc(sizeof(TypeDef_Table));
     if(Database->table==NULL) return NULL;
+
+    //Set defaut table values
+    Database->table->columns = NULL;
+    Database->table->nb_columns = 0;
+    Database->table->rows = NULL;
+    Database->table->nb_rows = 0;
 
     //If the first packet is not a column_count packet, free allocated memory and return NULL
     if(this->identifyPacket(packets_received[0], this->readInt(packets_received[0], 0, 3))!=PACKET_UNKNOWN){
@@ -435,13 +441,22 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     }
 
     //Row parsing
-    type = PACKET_UNKNOWN;
 
-    //Allocate 3D array (first dimension is columns)
-    Database->table->rows = (char***)malloc(sizeof(char**)*Database->table->nb_columns);
-    if(Database->table->rows==NULL){
-        this->freeDatabase(Database);
-        return NULL;
+    type = this->identifyPacket(packets_received[packet_offset], this->readLenEncInt(packets_received[packet_offset], 0)+4);
+
+    //If the recieved packet is not an EOF or ERR packet
+    if(type==PACKET_UNKNOWN){
+        //Allocate 3D array (first dimension is columns)
+        Database->table->rows = (char***)malloc(sizeof(char**)*Database->table->nb_columns);
+        if(Database->table->rows==NULL){
+            this->freeDatabase(Database);
+            return NULL;
+        }
+
+        //Init the first row at NULL to avoid EOF packet useless allocation
+        for(int i=0; i<Database->table->nb_columns; i++){
+            Database->table->rows[i] = NULL;
+        }
     }
 
     for(int i=packet_offset; type==PACKET_UNKNOWN; i++){
@@ -509,6 +524,7 @@ void MySQL::printDatabase(TypeDef_Database* Database){
 }
 
 void MySQL::freeDatabase(TypeDef_Database* Database){
+
     if(Database!=NULL){
         TypeDef_Table* table = Database->table;
 
@@ -516,16 +532,22 @@ void MySQL::freeDatabase(TypeDef_Database* Database){
             int nb_columns = Database->table->nb_columns;
             int nb_rows = Database->table->nb_rows;
 
-            for(int x=0; x<nb_columns; x++){
-                for(int y=0; y<nb_rows; y++){
-                    //Free row values
-                    free(table->rows[x][y]);
+            if(table->rows!=NULL){
+                for(int x=0; x<nb_columns; x++){
+
+                if(table->rows[x]!=NULL){
+
+                    for(int y=0; y<nb_rows; y++){
+                        //Free row values
+                        free(table->rows[x][y]);
+                    }
+                    //free rows
+                    free(table->rows[x]);
                 }
-                //free rows
-                free(table->rows[x]);
             }
             //Free colums
             free(table->rows);
+            }
 
             //Free table name
             free(table->table);
