@@ -17,18 +17,20 @@ To compile and flash this code I used [Mbed Studio](https://os.mbed.com/studio/)
 - Create a MySQL object by passing the initialized socket into the constructor argument
 
 # main.c Exeample
-## Code
+## Code (Without DNS)
 ```C++
 #include "mbed.h"
 #include "EthernetInterface.h"
 #include "STM32_MySQL.h"
 
 int main(void){
+	//Network configuration
 	const char* device_ip =	"Your STM32 IP";
-	const char* server_ip =	"Your MySQL Server IP";
 	const char* gateway =	"Your Gateway IP";
 	const char* netmask =	"Your Netmask";
-
+	const char* server_ip =	"Your MySQL Server IP";
+	
+	//MySQL user and password
 	char* mysql_user = 	"Your Username";
 	char* mysql_password = 	"Your Password";
 
@@ -64,6 +66,10 @@ int main(void){
 }
 ```
 ## Edit
+### Use DNS
+You can still resolve the MySQL server IP by resolving its IP address using [Mbed DNS Resolver](https://os.mbed.com/docs/mbed-os/v5.15/apis/dns-resolver.html).
+
+Just use ```gethostbyname()``` (blocking) function.
 ### Configure the constants
 ```C++
 const char* device_ip =	"Your STM32 IP";
@@ -74,10 +80,11 @@ const char* netmask =	"Your Netmask";
 char* mysql_user = 	"Your Username";
 char* mysql_password = 	"Your Password";
 ```
-### Run query
+## Run query
 ```C++
-Database = sql.query("SELECT * FROM database.table;",Database);
-```
-```C++
-sql.query("INSERT INTO database.table VALUES(Your values);")
+//Returns database typedef
+TypeDef_Database* Database = sql.query("SELECT * FROM database.table;",Database);
+
+//Returns boolean (true : OK_PACKET recieved, false : ERR_PACKET or EOF_PACKET RECIEVED)
+bool query_answer = sql.query("INSERT INTO database.table VALUES(Your values);");
 ```
