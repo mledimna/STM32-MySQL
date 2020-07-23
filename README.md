@@ -6,6 +6,7 @@ MySQL Client for STM32 using [Mbed library](https://github.com/ARMmbed/mbed-os)
 ![alt text](https://os.mbed.com/media/cache/platforms/DISCO_F746NG.jpg.250x250_q85.jpg)
 
 It can be executed on every target with Ethernet/WiFi.
+
 This code has been tested on the [32F746GDISCOVERY](https://www.st.com/en/evaluation-tools/32f746gdiscovery.html)
 ## IDE
 ### IDE Used
@@ -24,7 +25,7 @@ To compile and flash this code I used [Mbed Studio](https://os.mbed.com/studio/)
 #include "STM32_MySQL.h"
 
 int main(void){
-	//Network configuration
+	//Network constants
 	const char* device_ip =	"Your STM32 IP";
 	const char* gateway =	"Your Gateway IP";
 	const char* netmask =	"Your Netmask";
@@ -33,7 +34,8 @@ int main(void){
 	//MySQL user and password
 	char* mysql_user = 	"Your Username";
 	char* mysql_password = 	"Your Password";
-
+	
+	//Your favourite network interface
 	EthernetInterface eth;
 
 	//Network Configuration
@@ -43,9 +45,11 @@ int main(void){
 
 	//MySQL Object declaration
 	MySQL sql(&eth, server_ip);
-
+	
+	//Open MySQL session
 	sql.connect(mysql_user, mysql_password);
-
+	
+	//Database typedef to store database info and table result
 	TypeDef_Database* Database = NULL;
 
 	while(true){
@@ -55,12 +59,12 @@ int main(void){
 		//Print database over serial if something has been received
 		if(Database!=NULL) sql.printDatabase(Database);
 
-		//Make a simple query, if the query is OK, it returns true
+		//Make a simple query, if the query returns OK_PACKET form server, it returns true
 		if(sql.query("INSERT INTO database.table VALUES(Your values);")){
 			printf("Query OK !\r\n");
 		}
 
-		//Sleep for 5 seconds
+		//Sleep for 5 seconds because c'mon let's chill
 		ThisThread::sleep_for(5s);
 	}
 }
