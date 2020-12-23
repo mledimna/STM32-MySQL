@@ -18,14 +18,9 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.*/
 
-#include "mbed.h"
 #include "STM32_MySQL.h"
-#include "sha1.h"
-#include "EthernetInterface.h"
 
-#define RECV_SIZE               50000
-
-MySQL::MySQL(NetworkInterface* pNetworkInterface, const char* server_ip):mNetworkInterface(pNetworkInterface),server_ip(server_ip){}
+MySQL::MySQL(TCPSocket* pTCPSocket, const char* server_ip):tcp_socket(pTCPSocket),server_ip(server_ip){}
 
 MySQL::~MySQL(void){
     //Close MySQL Session
@@ -34,26 +29,15 @@ MySQL::~MySQL(void){
     //Close TCP Socket connection
     tcp_socket->close();
 
-    //delete TCP Socket object
-    delete tcp_socket;
-
     //free buffer if not NULL
     if(buffer != NULL) free(buffer);
 }
 
-bool MySQL::connect(char* user, char* password){
+bool MySQL::connect(const char* user, const char* password){
     bool ret = false;
     SocketAddress server;
 
-    //Delete TCPSocket if not NULL
-    delete tcp_socket;
-
-    //Create TCP Socket
-    tcp_socket = new TCPSocket();
     if(tcp_socket==NULL) return false;
-
-    //Set up TCP socket
-    if(tcp_socket->open(mNetworkInterface)!=0) return false;
     
     //Set MySQL server IP
     if(!server.set_ip_address(server_ip)) return false;
@@ -94,35 +78,32 @@ bool MySQL::disconnect()
 }
 
 uint8_t** MySQL::recieve(int* packets_count){
-    TypeDef_Database* Database = NULL;
-
     int data_recieved_length = 0; //Packet Length
     uint8_t* data_recieved = NULL; //Used to store recieved MySQL server response
 
-    uint8_t data = 0x00; //Buffer for recieved data
-    nsapi_size_or_error_t ret = 0; //Socket return type to check if there was something to read or if an error occured
+    uint8_t data[RECV_SIZE] = {0x00}; //Buffer for recieved data
+    nsapi_size_or_error_t ret = RECV_SIZE; //Socket return type to check if there was something to read or if an error occured
 
     uint8_t** packets_recieved = NULL;
 
     //To avoid blocking the actual thread, set the recieve timeout to 1000ms
-    tcp_socket->set_timeout(1000);
+    tcp_socket->set_timeout(100);
 
     //While there is something to read from the socket we execute the following algorithm
-    while(ret>=0){
+    while(ret==RECV_SIZE){
         //Store recieved data
-        ret = tcp_socket->recv(&data, 1);
+        ret = tcp_socket->recv(data, RECV_SIZE);
         
         //If there was something to read
-        if(ret>=0){
-            data_recieved_length++;
-
+        if(ret>0){
+            data_recieved_length+=ret;
             //If it's the first byte, use malloc, else use realloc for length-variable table
-            if(data_recieved_length==0) data_recieved = (uint8_t*)malloc(sizeof(uint8_t));
+            if(data_recieved_length==0) data_recieved = (uint8_t*)malloc(sizeof(uint8_t)*data_recieved_length);
             else data_recieved = (uint8_t*)realloc(data_recieved, sizeof(uint8_t)*data_recieved_length);
 
             //If malloc or realloc worked, append the recieved data to the last allocated index
             //Else return erro to user
-            if(data_recieved!=NULL) data_recieved[data_recieved_length-1] = data;
+            if(data_recieved!=NULL) memcpy(&data_recieved[data_recieved_length-ret],data,ret);
             else{
                 return NULL;
             }
@@ -146,13 +127,11 @@ uint8_t** MySQL::recieve(int* packets_count){
 
         //Allocate enought memory to store the packet data
         if(packets_recieved!=NULL) packets_recieved[(*packets_count)-1] = (uint8_t*)malloc(sizeof(uint8_t)*(payload_len+4));
-        else {
-            printf("Memory allocation error...\r\n");
-            return NULL;
-        }
+        else return NULL;
 
         //Attribute actual values to the allocated packet
-        for(int i=0; i<payload_len+4; i++) packets_recieved[(*packets_count)-1][i] = data_recieved[offset+i];
+        //for(int i=0; i<payload_len+4; i++) packets_recieved[(*packets_count)-1][i] = data_recieved[offset+i];
+        memcpy(packets_recieved[(*packets_count)-1],&data_recieved[offset],payload_len+4);
     }
 
     //To avoid opening another thread on https://stackoverflow.com/
@@ -218,19 +197,23 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     packet[4] = 0x03; //Set flag to COM_QUERY
     
     //Insert query into packet
-    for(int i=0; i<strlen(pQuery); i++) packet[i+5] = pQuery[i];
+    for(int i=0; i<(int)strlen(pQuery); i++) packet[i+5] = pQuery[i];
     
     //Send the query
     ret = this->mysql_write(packet,packet_len);
 
-    //Receive results
-    packets_received = this->recieve(&packets_count);
+    if(ret>0){
+        //Receive results
+        packets_received = this->recieve(&packets_count);
 
-    //Convert raw packets into Database struct
-    Database = this->parseTable(packets_received,packets_count);
+        if(packets_received != NULL){
+            //Convert raw packets into Database struct
+            Database = this->parseTable(packets_received,packets_count);
 
-    //Free raw packets
-    this->freeRecievedPackets(packets_received,&packets_count);
+            //Free raw packets
+            this->freeRecievedPackets(packets_received,&packets_count);
+        }
+    }
 
     //To avoid opening another thread on https://stackoverflow.com/
     free(packet);
@@ -253,7 +236,6 @@ bool MySQL::query(const char *pQuery){
     char * packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
-    int ret = 0;
 
     //Table of tables of packets
     uint8_t** packets_received = NULL;
@@ -271,10 +253,10 @@ bool MySQL::query(const char *pQuery){
     packet[4] = 0x03; //Set flag to COM_QUERY
     
     //Insert query into packet
-    for(int i=0; i<strlen(pQuery); i++) packet[i+5] = pQuery[i];
+    for(int i=0; i<(int)strlen(pQuery); i++) packet[i+5] = pQuery[i];
     
     //Send the query
-    ret = this->mysql_write(packet,packet_len);
+    this->mysql_write(packet,packet_len);
 
     //To avoid opening another thread on https://stackoverflow.com/
     free(packet);
@@ -296,7 +278,8 @@ bool MySQL::query(const char *pQuery){
     else if(packet_type==PACKET_ERR) {
         char* str = NULL;
         str = this->readLenEncString(packets_received[0], 12);
-        printf("%s\r\n",str);
+        
+        //LOG(str);
         free(str);
 
         //To avoid opening another thread on https://stackoverflow.com/
@@ -357,7 +340,6 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     type = PACKET_UNKNOWN;
     for(int i=1; type==PACKET_UNKNOWN; i++){
         int offset = 4;//Start at 4 to skip the payload header
-        int str_size = 0;
         int payload_size = this->readInt(packets_received[i],0,3);
 
         //This structure stores the strings sent to the client
@@ -565,169 +547,163 @@ void MySQL::freeDatabase(TypeDef_Database* Database){
     }
 }
 
-int MySQL::send_authentication_packet(char *user, char *password)
+int MySQL::send_authentication_packet(const char *user, const char *password)
 {
 	int status = 0;
-
 	int i = 0;
-	int len = 0;
-	//unsigned char test[256];
 	uint8_t *scramble;
 	int p_size;
 	int size_send = 4;
 
-  if (buffer != NULL)
-	  free(buffer);
+    if (buffer != NULL)
+        free(buffer);
 
-  buffer = (unsigned char*)malloc(256);
-  for (int i = 0 ; i<256; i++)
-  {
-	  buffer[i] = 0;
-  }
+    buffer = (unsigned char*)malloc(256);
+    for (int i = 0 ; i<256; i++)
+    {
+        buffer[i] = 0;
+    }
 
-  // client flags
-  buffer[size_send] = 0x85;
-  buffer[size_send+1] = 0xa6;
-  buffer[size_send+2] = 0x03;
-  buffer[size_send+3] = 0x00;
-  size_send += 4;
+    // client flags
+    buffer[size_send] = 0x85;
+    buffer[size_send+1] = 0xa6;
+    buffer[size_send+2] = 0x03;
+    buffer[size_send+3] = 0x00;
+    size_send += 4;
 
-  // max_allowed_packet
-  buffer[size_send] = 0;
-  buffer[size_send+1] = 0;
-  buffer[size_send+2] = 0;
-  buffer[size_send+3] = 1;
-  size_send += 4;
+    // max_allowed_packet
+    buffer[size_send] = 0;
+    buffer[size_send+1] = 0;
+    buffer[size_send+2] = 0;
+    buffer[size_send+3] = 1;
+    size_send += 4;
 
-  // charset - default is 8
-  buffer[size_send] = 0x08;
-  size_send += 1;
-  for( i = 0; i < 24; i++)
-    buffer[size_send+i] = 0x00;
-  size_send += 23;
-
-  // user name
-  memcpy(&buffer[size_send], user, strlen(user));
-  size_send += strlen(user) + 1;
-  buffer[size_send-1] = 0x00;
-
-  // password - see scramble password
-  scramble = (uint8_t*)malloc(20);
-  if (scramble_password(password, scramble)) {
-    buffer[size_send] = 0x14;
+    // charset - default is 8
+    buffer[size_send] = 0x08;
     size_send += 1;
-    for (int i = 0; i < 20; i++)
-      buffer[i+size_send] = scramble[i];
-    size_send += 20;
+    for( i = 0; i < 24; i++)
+        buffer[size_send+i] = 0x00;
+    size_send += 23;
+
+    // user name
+    memcpy(&buffer[size_send], user, strlen(user));
+    size_send += strlen(user) + 1;
+    buffer[size_send-1] = 0x00;
+
+    // password - see scramble password
+    scramble = (uint8_t*)malloc(20);
+    if (scramble_password(password, scramble)) {
+        buffer[size_send] = 0x14;
+        size_send += 1;
+        for (int i = 0; i < 20; i++)
+        buffer[i+size_send] = scramble[i];
+        size_send += 20;
+        buffer[size_send] = 0x00;
+    }
+    free(scramble);
+
+    // terminate password response
     buffer[size_send] = 0x00;
-  }
-  free(scramble);
+    size_send += 1;
 
-  // terminate password response
-  buffer[size_send] = 0x00;
-  size_send += 1;
+    // database
+    buffer[size_send+1] = 0x00;
+    size_send += 1;
 
-  // database
-  buffer[size_send+1] = 0x00;
-  size_send += 1;
+    // Write packet size
+    p_size = size_send - 4;
+    store_int(&buffer[0], p_size, 3);
+    buffer[3] = 0x01;
 
-  // Write packet size
-  p_size = size_send - 4;
-  store_int(&buffer[0], p_size, 3);
-  buffer[3] = 0x01;
-  len = strlen((char*)buffer);
-
-  status = mysql_write((char*)buffer,size_send);
-  read_packet();//To flush TCP socket
-  return status;
+    status = mysql_write((char*)buffer,size_send);
+    read_packet();//To flush TCP socket
+    return status;
 }
 
-int MySQL::scramble_password(char *password, uint8_t *pwd_hash) {
-	SHA1Context sha;
-  int i = 0;
-  int word = 0, shift = 24, count = 3;
-  uint8_t hash1[20];
-  uint8_t hash2[20];
-  uint8_t hash3[20];
-  uint8_t pwd_buffer[40];
+int MySQL::scramble_password(const char *password, uint8_t *pwd_hash) {
+    SHA1Context sha;
+    int word = 0, shift = 24, count = 3;
+    uint8_t hash1[20];
+    uint8_t hash2[20];
+    uint8_t hash3[20];
+    uint8_t pwd_buffer[40];
 
-  if (strlen(password) == 0)
-    return 0;
+    if (strlen(password) == 0)
+        return 0;
 
-  // hash1
-  SHA1Reset(&sha);
-  SHA1Input(&sha, (const unsigned char *) password, strlen(password));
-  SHA1Result(&sha);
-  for(int i = 0; i<20 ; i++)
-  {
-	hash1[i] = (sha.Message_Digest[word] >> shift);
-  	shift = shift - 8;
-  	if(i==count)
-  	{
-  		shift = 24;
-  		word++;
-  		count +=4;
-  	}
-
-  }
-  word = 0;
-  shift = 24;
-  count = 3;
-
-  // hash2
-  SHA1Reset(&sha);
-  SHA1Input(&sha, (const unsigned char *) hash1, 20);
-  SHA1Result(&sha);
-  for (int i = 0; i<20 ; i++)
+    // hash1
+    SHA1Reset(&sha);
+    SHA1Input(&sha, (const unsigned char *) password, strlen(password));
+    SHA1Result(&sha);
+    for(int i = 0; i<20 ; i++)
     {
-	  hash2[i] = (sha.Message_Digest[word] >> shift);
-    	shift = shift - 8;
-    	if(i==count)
-    	{
-    		shift = 24;
-    		word++;
-    		count +=4;
-    	}
+        hash1[i] = (sha.Message_Digest[word] >> shift);
+        shift = shift - 8;
+        if(i==count)
+        {
+            shift = 24;
+            word++;
+            count +=4;
+        }
 
     }
-  word = 0;
-  shift = 24;
-  count = 3;
+    word = 0;
+    shift = 24;
+    count = 3;
 
-  // hash3 of seed + hash2
-  SHA1Reset(&sha);
-  memcpy(pwd_buffer, &seed, 20);
-  memcpy(pwd_buffer+20, hash2, 20);
-  SHA1Input(&sha, (const unsigned char *) pwd_buffer, 40);
-  SHA1Result(&sha);
-  for (int i = 0; i<20 ; i++)
-      {
-	  hash3[i] = (sha.Message_Digest[word] >> shift);
-      	shift = shift - 8;
-      	if(i==count)
-      	{
-      		shift = 24;
-      		word++;
-      		count +=4;
-      	}
+    // hash2
+    SHA1Reset(&sha);
+    SHA1Input(&sha, (const unsigned char *) hash1, 20);
+    SHA1Result(&sha);
+    for (int i = 0; i<20 ; i++)
+        {
+        hash2[i] = (sha.Message_Digest[word] >> shift);
+            shift = shift - 8;
+            if(i==count)
+            {
+                shift = 24;
+                word++;
+                count +=4;
+            }
 
-      }
-  word = 0;
-  shift = 24;
-  count = 3;
+        }
+    word = 0;
+    shift = 24;
+    count = 3;
 
-  // XOR for hash4
-  for (int i = 0; i < 20; i++)
-    pwd_hash[i] = hash1[i] ^ hash3[i];
+    // hash3 of seed + hash2
+    SHA1Reset(&sha);
+    memcpy(pwd_buffer, &seed, 20);
+    memcpy(pwd_buffer+20, hash2, 20);
+    SHA1Input(&sha, (const unsigned char *) pwd_buffer, 40);
+    SHA1Result(&sha);
+    for (int i = 0; i<20 ; i++)
+    {
+    hash3[i] = (sha.Message_Digest[word] >> shift);
+        shift = shift - 8;
+        if(i==count)
+        {
+            shift = 24;
+            word++;
+            count +=4;
+        }
 
-  return 1;
+    }
+    word = 0;
+    shift = 24;
+    count = 3;
+
+    // XOR for hash4
+    for (int i = 0; i < 20; i++)
+        pwd_hash[i] = hash1[i] ^ hash3[i];
+
+    return 1;
 }
 
 void MySQL::read_packet() {
   uint8_t *data_rec = NULL;
   uint8_t local[4];
   int packet_len = 0;
-  int i = 0;
 
   if (buffer != NULL) {
       free(buffer);
@@ -755,27 +731,24 @@ void MySQL::read_packet() {
 }
 
 void MySQL::parse_handshake_packet() {
+    int i = 5;
+    do {
+        i++;
+    } while (buffer[i-1] != 0x00);
 
-	int j = 0;
-  int i = 5;
-  do {
-    i++;
-  } while (buffer[i-1] != 0x00);
-
-  // Capture the first 8 characters of seed
-  i += 4; // Skip thread id
-  for (int j = 0; j < 8; j++)
+    // Capture the first 8 characters of seed
+    i += 4; // Skip thread id
+    for (int j = 0; j < 8; j++)
     seed[j] = buffer[i+j];
 
-  // Capture rest of seed
-  i += 27; // skip ahead
-  for (int j = 0; j < 12; j++)
-    seed[j+8] = buffer[i+j];
+    // Capture rest of seed
+    i += 27; // skip ahead
+    for (int j = 0; j < 12; j++) seed[j+8] = buffer[i+j];
 }
 
 int MySQL::check_ok_packet() {
   int type = buffer[4];
-  if (type != OK_PACKET)
+  if (type != PACKET_OK)
     return type;
   return 0;
 }
@@ -824,7 +797,6 @@ char* MySQL::read_string(int *offset){
 int MySQL::read_int(int offset, int size){
   int value = 0;
   int new_size = 0;
-  int i;
 
   if (size == 0) new_size = get_lcb_len(offset);
   if (size == 1) return buffer[offset];

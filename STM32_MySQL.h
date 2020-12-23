@@ -2,15 +2,10 @@
 #define STM32_MYSQL_H
 
 #include "mbed.h"
+#include "EthernetInterface.h"
+#include "sha1.h"
 
-#define OK_PACKET     0x00
-#define EOF_PACKET    0xfe
-#define EOM_MES		  0xffaa
-#define ERROR_PACKET  0xff
-#define MAX_FIELDS    8//Maximum number of fields. Reduce to save memory. Default=32
-#define VERSION_STR   "1.0.4ga"
-#define WITH_SELECT
-#define DEST_PORT ((uint16_t)3306)
+#define RECV_SIZE   1024
 
 typedef struct{
     char* catalog = NULL;
@@ -42,56 +37,17 @@ typedef enum{
     PACKET_UNKNOWN = 0x03
 }Packet_Type;
 
-/*
-Columns memory structure :
-
- *   *   *   *   *   *   * 
-[*] [*] [*] [*] [*] [*] [*]
-
-*/
-
-/*
-Rows memory structure :
-
-   *   *   *   *   *   *   *
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-* [*] [*] [*] [*] [*] [*] [*]
-
-*/
-
 typedef struct{
     char* database; //Database Name
     TypeDef_Table* table; //Table struct pointer
 }TypeDef_Database;
 
-typedef struct {
-char *name;
-char *data;
-} field_struct;
-
-typedef struct {
-int num_fields;
-char *db;
-char *table;
-field_struct *fields[MAX_FIELDS];
-} column_names;
-
-// Structure for storing row data.
-typedef struct {
-char *values[MAX_FIELDS];
-} row_values;
-
 class MySQL{
     public:
-    MySQL(NetworkInterface* pNetworkInterface, const char* server_ip);
+    MySQL(TCPSocket* pTCPSocket, const char* server_ip);
     ~MySQL(void);
     
-    bool connect(char* user, char* password);
+    bool connect(const char* user, const char* password);
 
     bool disconnect();
 
@@ -101,7 +57,6 @@ class MySQL{
     void printDatabase(TypeDef_Database* Database);
     
     private:
-    NetworkInterface* mNetworkInterface = NULL;
     TCPSocket* tcp_socket = NULL;
     const char* server_ip = NULL;
     unsigned char *buffer = NULL;
@@ -113,8 +68,8 @@ class MySQL{
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
     void freeRecievedPackets(uint8_t** packets_received, int* packets_count);
     void freeDatabase(TypeDef_Database* Database);
-    int send_authentication_packet(char *user, char *password);
-    int scramble_password(char *password, uint8_t *pwd_hash);
+    int send_authentication_packet(const char *user, const char *password);
+    int scramble_password(const char *password, uint8_t *pwd_hash);
     void read_packet();
     void parse_handshake_packet();
     int check_ok_packet();
