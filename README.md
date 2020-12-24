@@ -18,33 +18,35 @@ To compile and flash this code I used [Mbed Studio](https://os.mbed.com/studio/)
 - Create a MySQL object by passing the initialized socket into the constructor argument
 
 # main.c Exeample
-## Code (Without DNS)
+## Code (With DNS)
 ```C++
 #include "mbed.h"
 #include "EthernetInterface.h"
 #include "STM32_MySQL.h"
 
+//Your favourite network interface
+EthernetInterface eth;
+
+//The TCP socket used to communicate with the MySQL server
+TCPSocket tcpSocket;
+
 int main(void){
 	//Network constants
-	const char* device_ip =	"Your STM32 IP";
-	const char* gateway =	"Your Gateway IP";
-	const char* netmask =	"Your Netmask";
 	const char* server_ip =	"Your MySQL Server IP";
 	
 	//MySQL user and password
 	char* mysql_user = 	"Your Username";
 	char* mysql_password = 	"Your Password";
-	
-	//Your favourite network interface
-	EthernetInterface eth;
 
 	//Network Configuration
-	eth.set_dhcp(false);
-	eth.set_network(device_ip, netmask, gateway);
-	eth.connect();
+    	eth.set_dhcp(true);
+    	eth.connect();
+	
+	//Socket Configuration
+	tcpSocket.open(&eth);
 
 	//MySQL Object declaration
-	MySQL sql(&eth, server_ip);
+	MySQL sql(&tcpSocket, server_ip);
 	
 	//Open MySQL session
 	sql.connect(mysql_user, mysql_password);
@@ -63,7 +65,6 @@ int main(void){
 		if(sql.query("INSERT INTO database.table VALUES(Your values);")){
 			printf("Query OK !\r\n");
 		}
-
 		//Sleep for 5 seconds because c'mon let's chill
 		ThisThread::sleep_for(5s);
 	}
@@ -76,11 +77,7 @@ You can still resolve the MySQL server IP by resolving its IP address using [Mbe
 Just use ```gethostbyname()``` (blocking) function.
 ### Configure the constants
 ```C++
-const char* device_ip =	"Your STM32 IP";
 const char* server_ip =	"Your MySQL Server IP";
-const char* gateway =	"Your Gateway IP";
-const char* netmask =	"Your Netmask";
-
 char* mysql_user = 	"Your Username";
 char* mysql_password = 	"Your Password";
 ```
