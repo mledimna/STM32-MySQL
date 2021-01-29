@@ -67,7 +67,7 @@ class MySQL{
     Packet_Type identifyPacket(uint8_t* packet, int packet_length);
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
     void freeRecievedPackets(uint8_t** packets_received, int* packets_count);
-    void freeDatabase(TypeDef_Database* Database);
+    TypeDef_Database* freeDatabase(TypeDef_Database* Database);
     int send_authentication_packet(const char *user, const char *password);
     int scramble_password(const char *password, uint8_t *pwd_hash);
     void read_packet();

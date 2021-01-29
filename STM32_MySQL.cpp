@@ -179,10 +179,8 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     int packets_count = 0;
 
     int ret = 0;
-
     //Free database struct pointer if not NULL
-    if(Database!=NULL) this->freeDatabase(Database);
-
+    if(Database!=NULL) Database = this->freeDatabase(Database);
     payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
     packet_len = payload_len+4; //Header + Payload length
 
@@ -279,7 +277,6 @@ bool MySQL::query(const char *pQuery){
         char* str = NULL;
         str = this->readLenEncString(packets_received[0], 12);
         
-        //LOG(str);
         free(str);
 
         //To avoid opening another thread on https://stackoverflow.com/
@@ -322,7 +319,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
 
     //If the first packet is not a column_count packet, free allocated memory and return NULL
     if(this->identifyPacket(packets_received[0], this->readInt(packets_received[0], 0, 3))!=PACKET_UNKNOWN){
-        this->freeDatabase(Database);
+        Database = this->freeDatabase(Database);
         return NULL;
     }
 
@@ -332,7 +329,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     //Allocate enough memory for the column names
     Database->table->columns = (char**)malloc(sizeof(char*)*Database->table->nb_columns);
     if(Database->table->columns==NULL){
-        this->freeDatabase(Database);
+        Database = this->freeDatabase(Database);
         return NULL;
     }
 
@@ -349,7 +346,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.catalog = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.catalog==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -357,7 +354,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.schema = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.schema==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -365,7 +362,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.table = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.table==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -373,7 +370,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.org_table = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.org_table==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -381,7 +378,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.name = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.name==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -389,7 +386,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         column_def.org_name = this->readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.org_name==NULL) {
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -431,7 +428,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         //Allocate 3D array (first dimension is columns)
         Database->table->rows = (char***)malloc(sizeof(char**)*Database->table->nb_columns);
         if(Database->table->rows==NULL){
-            this->freeDatabase(Database);
+            Database = this->freeDatabase(Database);
             return NULL;
         }
 
@@ -456,7 +453,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
 
             //Check allocation integrity
             if(Database->table->rows[j]==NULL){
-                this->freeDatabase(Database);
+                Database = this->freeDatabase(Database);
                 return NULL;
             }
 
@@ -465,7 +462,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
             
             //Check allocation integrity
             if(Database->table->rows[j][nb_rows-1]==NULL){
-                this->freeDatabase(Database);
+                Database = this->freeDatabase(Database);
                 return NULL;
             }
 
@@ -505,7 +502,7 @@ void MySQL::printDatabase(TypeDef_Database* Database){
     }
 }
 
-void MySQL::freeDatabase(TypeDef_Database* Database){
+TypeDef_Database* MySQL::freeDatabase(TypeDef_Database* Database){
 
     if(Database!=NULL){
         TypeDef_Table* table = Database->table;
@@ -516,35 +513,33 @@ void MySQL::freeDatabase(TypeDef_Database* Database){
 
             if(table->rows!=NULL){
                 for(int x=0; x<nb_columns; x++){
-
-                if(table->rows[x]!=NULL){
-
-                    for(int y=0; y<nb_rows; y++){
-                        //Free row values
-                        free(table->rows[x][y]);
+                    if(table->rows[x]!=NULL){
+                        for(int y=0; y<nb_rows; y++) free(table->rows[x][y]);
+                        free(table->rows[x]);
                     }
-                    //free rows
-                    free(table->rows[x]);
                 }
-            }
-            //Free colums
-            free(table->rows);
+                free(table->rows);
             }
 
             //Free table name
-            free(table->table);
             table->nb_columns = 0;
             table->nb_rows = 0;
+
+            free(table->table);
         }
         //Free table struct pointer
         free(table);
+        Database->table = NULL;
 
         //Free database name
         free(Database->database);
+        Database->database = NULL;
 
         //Free database struct pointer
         free(Database);
+        Database = NULL;
     }
+    return Database;
 }
 
 int MySQL::send_authentication_packet(const char *user, const char *password)
