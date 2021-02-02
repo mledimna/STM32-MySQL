@@ -697,7 +697,6 @@ int MySQL::scramble_password(const char *password, uint8_t *pwd_hash) {
 
 void MySQL::read_packet() {
   uint8_t *data_rec = NULL;
-  uint8_t local[4];
   int packet_len = 0;
 
   if (buffer != NULL) {
@@ -716,7 +715,6 @@ void MySQL::read_packet() {
   
   if (buffer == NULL) return;
 
-  for (int i = 0; i < 4; i++) buffer[i] = local[i];
   for (int i = 4; i < packet_len+4; i++) buffer[i] = data_rec[i];
 
   memset( data_rec, '\0', sizeof(*data_rec) );
