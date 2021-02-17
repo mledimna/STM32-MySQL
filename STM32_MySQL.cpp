@@ -104,9 +104,7 @@ uint8_t** MySQL::recieve(int* packets_count){
             //If malloc or realloc worked, append the recieved data to the last allocated index
             //Else return erro to user
             if(data_recieved!=NULL) memcpy(&data_recieved[data_recieved_length-ret],data,ret);
-            else{
-                return NULL;
-            }
+            else return NULL;
         }
     }
 
@@ -171,7 +169,7 @@ Packet_Type MySQL::identifyPacket(uint8_t* packet, int packet_length){
 }
 
 TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
-    char * packet = NULL;
+    static char * packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
 
@@ -181,11 +179,13 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     int ret = 0;
     //Free database struct pointer if not NULL
     if(Database!=NULL) Database = this->freeDatabase(Database);
+
     payload_len = strlen(pQuery)+1; //Query length + COM_QUERY Flag
     packet_len = payload_len+4; //Header + Payload length
 
     //Allocate memory for the packet
     packet = (char*)malloc(packet_len);
+    if(packet==NULL) return NULL;
 
     //Set 3 first bytes as the payload length
     this->store_int((uint8_t*)packet, payload_len, 3);
@@ -231,7 +231,7 @@ void MySQL::freeRecievedPackets(uint8_t** packets_received, int* packets_count){
 }
 
 bool MySQL::query(const char *pQuery){
-    char * packet = NULL;
+    static char * packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
 
@@ -244,6 +244,8 @@ bool MySQL::query(const char *pQuery){
     packet_len = payload_len+4; //Header + Payload length
 
     packet = (char*)malloc(packet_len); //Allocate memory for the packet
+
+    if(packet==NULL) return false;
 
     this->store_int((uint8_t*)packet, payload_len, 3);
 
@@ -258,6 +260,7 @@ bool MySQL::query(const char *pQuery){
 
     //To avoid opening another thread on https://stackoverflow.com/
     free(packet);
+    packet = NULL;
 
     //Receive results
     packets_received = this->recieve(&packets_count);
@@ -309,7 +312,10 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
 
     //Allocate memory for table structure
     Database->table = (TypeDef_Table*)malloc(sizeof(TypeDef_Table));
-    if(Database->table==NULL) return NULL;
+    if(Database->table==NULL) {
+        this->freeDatabase(Database);
+        return NULL;
+    }
 
     //Set defaut table values
     Database->table->columns = NULL;
@@ -505,30 +511,30 @@ void MySQL::printDatabase(TypeDef_Database* Database){
 TypeDef_Database* MySQL::freeDatabase(TypeDef_Database* Database){
 
     if(Database!=NULL){
-        TypeDef_Table* table = Database->table;
-
-        if(table!=NULL){
+        if(Database->table!=NULL){
             int nb_columns = Database->table->nb_columns;
             int nb_rows = Database->table->nb_rows;
 
-            if(table->rows!=NULL){
+            if(Database->table->rows!=NULL){
                 for(int x=0; x<nb_columns; x++){
-                    if(table->rows[x]!=NULL){
-                        for(int y=0; y<nb_rows; y++) free(table->rows[x][y]);
-                        free(table->rows[x]);
+                    if(Database->table->columns!=NULL) free(Database->table->columns[x]);
+                    if(Database->table->rows[x]!=NULL){
+                        for(int y=0; y<nb_rows; y++) free(Database->table->rows[x][y]);
+                        free(Database->table->rows[x]);
                     }
                 }
-                free(table->rows);
+                free(Database->table->columns);
+                free(Database->table->rows);
             }
 
             //Free table name
-            table->nb_columns = 0;
-            table->nb_rows = 0;
+            Database->table->nb_columns = 0;
+            Database->table->nb_rows = 0;
 
-            free(table->table);
+            free(Database->table->table);
         }
         //Free table struct pointer
-        free(table);
+        free(Database->table);
         Database->table = NULL;
 
         //Free database name
