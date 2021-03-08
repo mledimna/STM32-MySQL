@@ -3,7 +3,9 @@
 
 #include "mbed.h"
 #include "EthernetInterface.h"
-#include "sha1.h"
+#include "./Utils/PacketsTypes/PacketsTypes.h"
+#include "./Utils/SHA1/SHA1.h"
+#include "./Utils/SQLVarTypes/SQLVarTypes.h"
 
 #define RECV_SIZE   1024
 
@@ -30,13 +32,6 @@ typedef struct{
     char*** rows = NULL; //Row Values
 }TypeDef_Table;
 
-typedef enum{
-    PACKET_OK = 0x00,
-    PACKET_ERR = 0x01,
-    PACKET_EOF = 0x02,
-    PACKET_UNKNOWN = 0x03
-}Packet_Type;
-
 typedef struct{
     char* database; //Database Name
     TypeDef_Table* table; //Table struct pointer
@@ -48,7 +43,6 @@ class MySQL{
     ~MySQL(void);
     
     bool connect(const char* user, const char* password);
-
     bool disconnect();
 
     TypeDef_Database* query(const char *pQuery, TypeDef_Database* Database);
@@ -56,15 +50,15 @@ class MySQL{
     
     void printDatabase(TypeDef_Database* Database);
     
+
     private:
     TCPSocket* tcp_socket = NULL;
     const char* server_ip = NULL;
-    unsigned char *buffer = NULL;
+    uint8_t *buffer = NULL;
     uint8_t seed[20] = {0};
 
     uint8_t** recieve(int* packets_count);
     int mysql_write(char * message, uint16_t len);
-    Packet_Type identifyPacket(uint8_t* packet, int packet_length);
     TypeDef_Database* parseTable(uint8_t** packets_received,int packets_count);
     void freeRecievedPackets(uint8_t** packets_received, int* packets_count);
     TypeDef_Database* freeDatabase(TypeDef_Database* Database);
@@ -74,13 +68,6 @@ class MySQL{
     void parse_handshake_packet();
     int check_ok_packet();
     int getNewOffset(uint8_t * packet, int offset);
-    int get_lcb_len(int offset);
-    char *read_string(int *offset);
-    int read_int(int offset, int size);
-    int readInt(uint8_t * packet, int offset, int size);
-    int readLenEncInt(uint8_t * packet, int offset);
-    char* readLenEncString(uint8_t * packet, int offset);
-    void store_int(uint8_t *buff, long value, int size);
 };
 
 #endif

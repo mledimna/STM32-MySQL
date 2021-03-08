@@ -117,9 +117,9 @@ uint8_t** MySQL::recieve(int* packets_count){
     for(int offset=0; offset<data_recieved_length; offset+=4+payload_len){
         
         (*packets_count)++;//Increment the number of packets received
-        payload_len = this->readInt(data_recieved, offset, 3);//Read the actual packet payload length
+        payload_len = readInt(data_recieved, offset, 3);//Read the actual packet payload length
 
-        //Use malloc for the first packet, the use realloc
+        //Use malloc for the first packet, then use realloc
         if(offset==0)packets_recieved = (uint8_t**)malloc(sizeof(uint8_t*));
         else packets_recieved = (uint8_t**)realloc(packets_recieved,sizeof(uint8_t*)*(*packets_count));
 
@@ -143,31 +143,6 @@ int MySQL::mysql_write(char * message, uint16_t len) {
 	return tcp_socket->send((void*)message, len);
 }
 
-Packet_Type MySQL::identifyPacket(uint8_t* packet, int packet_length){
-    Packet_Type type = PACKET_UNKNOWN;
-
-    if(packet_length>0){
-        switch(packet[4]){
-            case 0x00:
-                type = PACKET_OK;
-            break;
-
-            case 0xFF:
-                type = PACKET_ERR;
-            break;
-
-            case 0xFE:
-                type = PACKET_EOF;
-            break;
-
-            default:
-            break;
-        }
-    }
-
-    return type;
-}
-
 TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     static char * packet = NULL;
     int packet_len = 0;
@@ -188,7 +163,7 @@ TypeDef_Database* MySQL::query(const char *pQuery, TypeDef_Database* Database){
     if(packet==NULL) return NULL;
 
     //Set 3 first bytes as the payload length
-    this->store_int((uint8_t*)packet, payload_len, 3);
+    store_int((uint8_t*)packet, payload_len, 3);
 
     //Edit protocol related bytes
     packet[3] = 0x00; //Sequence ID : Initiator
@@ -247,7 +222,7 @@ bool MySQL::query(const char *pQuery){
 
     if(packet==NULL) return false;
 
-    this->store_int((uint8_t*)packet, payload_len, 3);
+    store_int((uint8_t*)packet, payload_len, 3);
 
     packet[3] = 0x00; //Sequence ID : Initiator
     packet[4] = 0x03; //Set flag to COM_QUERY
@@ -267,8 +242,8 @@ bool MySQL::query(const char *pQuery){
 
     if(packets_received==NULL) return false;
     
-    packet_len = this->readInt(packets_received[0], 0, 3)+4;
-    uint8_t packet_type = this->identifyPacket(packets_received[0], this->readInt(packets_received[0], 0, 3)+4);
+    packet_len = readInt(packets_received[0], 0, 3)+4;
+    uint8_t packet_type = identifyPacket(packets_received[0], readInt(packets_received[0], 0, 3)+4);
 
     if(packet_type==PACKET_OK) {
         //To avoid opening another thread on https://stackoverflow.com/
@@ -278,7 +253,7 @@ bool MySQL::query(const char *pQuery){
     }
     else if(packet_type==PACKET_ERR) {
         char* str = NULL;
-        str = this->readLenEncString(packets_received[0], 12);
+        str = readLenEncString(packets_received[0], 12);
         
         free(str);
 
@@ -324,7 +299,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     Database->table->nb_rows = 0;
 
     //If the first packet is not a column_count packet, free allocated memory and return NULL
-    if(this->identifyPacket(packets_received[0], this->readInt(packets_received[0], 0, 3))!=PACKET_UNKNOWN){
+    if(identifyPacket(packets_received[0], readInt(packets_received[0], 0, 3))!=PACKET_UNKNOWN){
         Database = this->freeDatabase(Database);
         return NULL;
     }
@@ -343,13 +318,13 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
     type = PACKET_UNKNOWN;
     for(int i=1; type==PACKET_UNKNOWN; i++){
         int offset = 4;//Start at 4 to skip the payload header
-        int payload_size = this->readInt(packets_received[i],0,3);
+        int payload_size = readInt(packets_received[i],0,3);
 
         //This structure stores the strings sent to the client
         TypeDef_ColumnDefinition column_def;
 
         //Get catalog value
-        column_def.catalog = this->readLenEncString(packets_received[i], offset);
+        column_def.catalog = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.catalog==NULL) {
             Database = this->freeDatabase(Database);
@@ -357,7 +332,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         }
 
         //Get schema value
-        column_def.schema = this->readLenEncString(packets_received[i], offset);
+        column_def.schema = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.schema==NULL) {
             Database = this->freeDatabase(Database);
@@ -365,7 +340,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         }
 
         //Get table value
-        column_def.table = this->readLenEncString(packets_received[i], offset);
+        column_def.table = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.table==NULL) {
             Database = this->freeDatabase(Database);
@@ -373,7 +348,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         }
 
         //Get org tabe value
-        column_def.org_table = this->readLenEncString(packets_received[i], offset);
+        column_def.org_table = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.org_table==NULL) {
             Database = this->freeDatabase(Database);
@@ -381,7 +356,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         }
 
         //Get column name value
-        column_def.name = this->readLenEncString(packets_received[i], offset);
+        column_def.name = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.name==NULL) {
             Database = this->freeDatabase(Database);
@@ -389,7 +364,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         }
 
         //Get column org name value
-        column_def.org_name = this->readLenEncString(packets_received[i], offset);
+        column_def.org_name = readLenEncString(packets_received[i], offset);
         offset = this->getNewOffset(packets_received[i],offset);
         if(column_def.org_name==NULL) {
             Database = this->freeDatabase(Database);
@@ -419,7 +394,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         Database->table->columns[i-1] = column_def.name;
 
         //Check the next packet type to exit the for loop if needed
-        type = this->identifyPacket(packets_received[i+1], payload_size+4);
+        type = identifyPacket(packets_received[i+1], payload_size+4);
 
         //If the next packet is an EOF, just jump it by adding 2 to packet offset
         if(type==PACKET_EOF) packet_offset = i+2;
@@ -427,7 +402,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
 
     //Row parsing
 
-    type = this->identifyPacket(packets_received[packet_offset], this->readLenEncInt(packets_received[packet_offset], 0)+4);
+    type = identifyPacket(packets_received[packet_offset], readLenEncInt(packets_received[packet_offset], 0)+4);
 
     //If the recieved packet is not an EOF or ERR packet
     if(type==PACKET_UNKNOWN){
@@ -446,7 +421,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
 
     for(int i=packet_offset; type==PACKET_UNKNOWN; i++){
         int offset = 4;
-        int payload_size = this->readInt(packets_received[i],0,3);
+        int payload_size = readInt(packets_received[i],0,3);
 
         int nb_rows = (i+1)-packet_offset; //Increment the number of rows
 
@@ -464,7 +439,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
             }
 
             //Allocate 3D array (Third dimension is strings)
-            Database->table->rows[j][nb_rows-1] = this->readLenEncString(packets_received[i], offset);
+            Database->table->rows[j][nb_rows-1] = readLenEncString(packets_received[i], offset);
             
             //Check allocation integrity
             if(Database->table->rows[j][nb_rows-1]==NULL){
@@ -480,7 +455,7 @@ TypeDef_Database* MySQL::parseTable(uint8_t** packets_received,int packets_count
         Database->table->nb_rows = nb_rows;
 
         //To check if next packet is EOF_PACKET (end of loop)
-        type = this->identifyPacket(packets_received[i+1], payload_size+4);
+        type = identifyPacket(packets_received[i+1], payload_size+4);
     }
 
     return Database;
@@ -754,7 +729,7 @@ int MySQL::check_ok_packet() {
 
 int MySQL::getNewOffset(uint8_t * packet, int offset) {
     //Reads the length encoded variable value to jump it
-    int str_size = this->readLenEncInt(packet, offset);
+    int str_size = readLenEncInt(packet, offset);
 
     if(packet[offset]<251) offset += 1+str_size;
     else if(packet[offset]==0xFC) offset += 3+str_size;
@@ -762,112 +737,4 @@ int MySQL::getNewOffset(uint8_t * packet, int offset) {
     else if(packet[offset]==0xFE) offset += 9+str_size;
 
   return offset;
-}
-
-int MySQL::get_lcb_len(int offset) {
-  int read_len = buffer[offset];
-  if (read_len > 250) {
-    // read type:
-	uint8_t type = buffer[offset+1];
-    if (type == 0xfc)
-      read_len = 2;
-    else if (type == 0xfd)
-      read_len = 3;
-    else if (type == 0xfe)
-      read_len = 8;
-  }
-  return read_len;
-}
-
-char* MySQL::read_string(int *offset){
-    int len = get_lcb_len(*offset);
-    char *str = NULL;
-    char head = buffer[*(offset)];
-
-    if(head==0xFE) return NULL;
-    
-    str = (char*)malloc(len+1);
-    memcpy(str, (char *)&buffer[*offset+1], len);
-    str[len] = '\0';
-
-    return str;
-}
-
-int MySQL::read_int(int offset, int size){
-  int value = 0;
-  int new_size = 0;
-
-  if (size == 0) new_size = get_lcb_len(offset);
-  if (size == 1) return buffer[offset];
-
-  new_size = size;
-
-  int shifter = (new_size - 1) * 8;
-
-  for (int i = new_size; i > 0; i--) {
-    value += (uint8_t)(buffer[i-1] << shifter);
-    shifter -= 8;
-  }
-
-  return value;
-}
-
-int MySQL::readInt(uint8_t * packet, int offset, int size) {
-  int value = 0;
-
-  for(int i=0; i<size; i++) value |= packet[i+offset]<<(i*8);
-
-  return value;
-}
-
-int MySQL::readLenEncInt(uint8_t * packet, int offset) {
-  int value = 0;
-
-  if(packet[offset]<251) return packet[offset];
-  else if(packet[offset]==0xFC){
-      for(int i=0; i<2; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-  else if(packet[offset]==0xFD){
-      for(int i=0; i<3; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-  else if(packet[offset]==0xFE){
-      for(int i=0; i<8; i++) value |= packet[i+1+offset]<<(i*8);
-  }
-
-  return value;
-}
-
-char* MySQL::readLenEncString(uint8_t * packet, int offset){
-    char* str = NULL;
-    int str_size = this->readLenEncInt(packet, offset);
-
-    str = (char*)malloc(sizeof(char)*(str_size+1));
-
-    if(packet[offset]<251) for(int i=0; i<str_size; i++) str[i] = packet[i+1+offset];
-    else if(packet[offset]==0xFC) for(int i=0; i<str_size; i++) str[i] = packet[i+3+offset];
-    else if(packet[offset]==0xFD) for(int i=0; i<str_size; i++) str[i] = packet[i+4+offset];
-    else if(packet[offset]==0xFE) for(int i=0; i<str_size; i++) str[i] = packet[i+9+offset];
-
-    str[str_size] = '\0';
-
-    return str;
-}
-
-void MySQL::store_int(uint8_t *buff, long value, int size){
-    memset(buff, 0, size);
-    if (value < 0xff)
-        buff[0] = (uint8_t)value;
-    else if (value < 0xffff) {
-        buff[0] = (uint8_t)value;
-        buff[1] = (uint8_t)(value >> 8);
-    } else if (value < 0xffffff) {
-        buff[0] = (uint8_t)value;
-        buff[1] = (uint8_t)(value >> 8);
-        buff[2] = (uint8_t)(value >> 16);
-    } else if (value < 0xffffff) {
-        buff[0] = (uint8_t)value;
-        buff[1] = (uint8_t)(value >> 8);
-        buff[2] = (uint8_t)(value >> 16);
-        buff[3] = (uint8_t)(value >> 24);
-    }
 }
