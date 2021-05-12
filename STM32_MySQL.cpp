@@ -30,12 +30,9 @@ MySQL::~MySQL(void)
     //Close MySQL Session
     this->disconnect();
 
-    //free buffer if not NULL
-    if (this->mBuffer != NULL)
-        this->freeBuffer();
-
-    this->freeRecievedPackets();
     this->freeDatabase();
+    this->freeRecievedPackets();
+    this->freeBuffer();
 }
 
 /**
@@ -187,13 +184,14 @@ int MySQL::write(char *message, uint16_t len)
  */
 bool MySQL::query(const char *pQuery)
 {
-    static char *packet = NULL;
+    char *packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
     int ret = 0;
 
-    this->freeDatabase();
+    this->freeBuffer();
     this->freeRecievedPackets();
+    this->freeDatabase();
 
     // Query length + COM_QUERY Flag
     payload_len = strlen(pQuery) + 1;
@@ -308,7 +306,7 @@ bool MySQL::parseTable(void)
     for (int i = 0; packet_type != PACKET_EOF; i++)
     {
         int offset = 0;
-/*
+        /*
         //Get catalog value
         readLenEncString(column_def.catalog, packet, offset);
         offset = this->getNewOffset(packet, offset);
@@ -434,17 +432,21 @@ void MySQL::freeDatabase(void)
             int nb_columns = this->mDatabase->Table->Column_Count;
             int nb_rows = this->mDatabase->Table->Row_Count;
 
-            for (int col = 0; col < nb_columns; col++)
+            if (nb_rows > 0)
             {
-                for (int row = 0; row < nb_rows; row++)
+
+                for (int col = 0; col < nb_columns; col++)
                 {
-                    // Free field value
-                    free(this->mDatabase->Table->Row_Values[col][row]);
+                    for (int row = 0; row < nb_rows; row++)
+                    {
+                        // Free field value
+                        free(this->mDatabase->Table->Row_Values[col][row]);
+                    }
+                    // Free row
+                    free(this->mDatabase->Table->Row_Values[col]);
+                    // Free column
+                    // free(this->mDatabase->Table->Column_Names[col]);
                 }
-                // Free row
-                free(this->mDatabase->Table->Row_Values[col]);
-                // Free column
-                // free(this->mDatabase->Table->Column_Names[col]);
             }
 
             // Free table name
@@ -460,6 +462,7 @@ void MySQL::freeDatabase(void)
 
         // Free database main pointer
         free(this->mDatabase);
+        this->mDatabase = NULL;
     }
 }
 
@@ -691,9 +694,12 @@ int MySQL::getNewOffset(const uint8_t *packet, int offset)
 
 void MySQL::freeBuffer(void)
 {
-    // Clean reset mBuffer size and content
-    memset(this->mBuffer, 0, this->mBufferSize);
-    this->mBufferSize = 0;
-    free(this->mBuffer);
-    this->mBuffer = NULL;
+    if (this->mBuffer != NULL)
+    {
+        // Clean reset mBuffer size and content
+        memset(this->mBuffer, 0, this->mBufferSize);
+        this->mBufferSize = 0;
+        free(this->mBuffer);
+        this->mBuffer = NULL;
+    }
 }
