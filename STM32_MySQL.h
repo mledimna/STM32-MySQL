@@ -21,6 +21,13 @@
 #include "./Utils/SHA1/SHA1.h"
 #include "./Utils/SQLVarTypes/SQLVarTypes.h"
 
+/**
+ * @brief Used to recieve RECV_SIZE bytes from server.
+ * This does not limit the recieve size, incoming data
+ * will then be sored into mBuffer which is a dynamic 
+ * size buffer.
+ * 
+ */
 #define RECV_SIZE 1024
 
 typedef struct
@@ -39,19 +46,27 @@ typedef struct
     int decimals = 0;
 } TypeDef_ColumnDefinition;
 
+/**
+ * @brief Stores the SELECT query result.
+ * 
+ */
 typedef struct
 {
-    char *Table_Name = NULL;    
-    int Column_Count = 0;       //Number of columns
-    int Row_Count = 0;          //Number of rows
-    char **Column_Names = NULL; //Column names
-    char ***Row_Values = NULL;  //Row Values
+    char *Table_Name = NULL;
+    int Column_Count = 0;
+    int Row_Count = 0;
+    char **Column_Names = NULL;
+    char ***Row_Values = NULL;
 } TypeDef_Table;
 
+/**
+ * @brief Stores the SELECT query results.
+ * 
+ */
 typedef struct
 {
-    char *Database_Name = NULL;  //Database Name
-    TypeDef_Table *Table = NULL; //Table struct pointer
+    char *Database_Name = NULL;
+    TypeDef_Table *Table = NULL;
 } TypeDef_Database;
 
 class MySQL
@@ -65,19 +80,24 @@ public:
     void printDatabase(void);
 
 private:
+    // User configured TCP socket attached to NetworkInterface
     TCPSocket *mTcpSocket = NULL;
+    // MySQL Server IP
     const char *mServerIP = NULL;
 
+    // mBuffer stores the raw bytes recieved from TCP socket
     uint8_t *mBuffer = NULL;
     uint32_t mBufferSize = 0;
 
-    std::vector<MySQL_Packet*> mPacketsRecieved;
+    // std::vector storing MySQL packets parsed from mBuffer
+    std::vector<MySQL_Packet *> mPacketsRecieved;
 
-    uint8_t mSeed[20] = {0};                
+    // Seed used to hash password through SHA-1
+    uint8_t mSeed[20] = {0};
 
-    TypeDef_Database* mDatabase = NULL;
+    // Stores the recieved table following a SELECT query
+    TypeDef_Database *mDatabase = NULL;
 
-    // IO Functions
     bool recieve(void);
     int write(char *message, uint16_t len);
     int send_authentication_packet(const char *user, const char *password);
@@ -87,7 +107,7 @@ private:
     int getNewOffset(const uint8_t *packet, int offset);
     int check_ok_packet(void);
     int scramble_password(const char *password, uint8_t *pwd_hash);
-    
+
     void freeBuffer(void);
     void freeRecievedPackets(void);
     void freeDatabase(void);

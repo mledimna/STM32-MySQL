@@ -12,9 +12,9 @@
 #include "STM32_MySQL.h"
 
 /**
- * @brief Construct a new MySQL::MySQL object
+ * @brief Creates a MySQL object
  * 
- * @param pTCPSocket Binded socket to your network interface
+ * @param pTCPSocket Attached socket to a network interface
  * @param server_ip MySQL server IP address
  */
 MySQL::MySQL(TCPSocket *pTCPSocket, const char *server_ip) : mTcpSocket(pTCPSocket), mServerIP(server_ip)
@@ -22,7 +22,7 @@ MySQL::MySQL(TCPSocket *pTCPSocket, const char *server_ip) : mTcpSocket(pTCPSock
 }
 
 /**
- * @brief Destroy the MySQL::MySQL object
+ * @brief Destroys the MySQL object
  * 
  */
 MySQL::~MySQL(void)
@@ -253,6 +253,10 @@ bool MySQL::query(const char *pQuery)
     return false;
 }
 
+/**
+ * @brief Free packets vector content and empties it
+ * 
+ */
 void MySQL::freeRecievedPackets(void)
 {
     if (this->mPacketsRecieved.size() > 0)
@@ -265,6 +269,12 @@ void MySQL::freeRecievedPackets(void)
     }
 }
 
+/**
+ * @brief Parses recieved packets considered as a table result
+ * 
+ * @return true Table parsed
+ * @return false Unable to parse table
+ */
 bool MySQL::parseTable(void)
 {
     // Used to keep track of the actual packet
@@ -305,58 +315,17 @@ bool MySQL::parseTable(void)
     //This structure stores the strings sent to the client
     for (int i = 0; packet_type != PACKET_EOF; i++)
     {
-        int offset = 0;
-        /*
-        //Get catalog value
-        readLenEncString(column_def.catalog, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Get schema value
-        readLenEncString(column_def.schema, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Get table value
-        readLenEncString(column_def.table, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Get org table value
-        readLenEncString(column_def.org_table, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Get column name value
-        readLenEncString(column_def.name, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Get column org name value
-        readLenEncString(column_def.org_name, packet, offset);
-        offset = this->getNewOffset(packet, offset);
-
-        //Attribute the column name to the column description value
-        this->mDatabase->Table->Column_Names[i] = (char *)malloc(strlen(column_def.name) + 1);
-        memcpy(this->mDatabase->Table->Column_Names[i], column_def.name, strlen(column_def.name) + 1);
-*/
         //Check the next packet type to exit the for loop if needed
         packet_offset++;
         packet = this->mPacketsRecieved.at(packet_offset)->getPayload();
         packet_type = this->mPacketsRecieved.at(packet_offset)->getPacketType();
     }
 
-    // this->freeRecievedPackets();
-    // return true;
-    /*
-    //Attribute allocated pointer to database and table names
-    this->mDatabase->Database_Name = (char *)malloc(strlen(column_def.schema) + 1);
-    memcpy(this->mDatabase->Database_Name, column_def.schema, strlen(column_def.schema) + 1);
-
-    this->mDatabase->Table->Table_Name = (char *)malloc(strlen(column_def.table) + 1);
-    memcpy(this->mDatabase->Table->Table_Name, column_def.table, strlen(column_def.table) + 1);
-    */
     packet_offset++;
     packet = this->mPacketsRecieved.at(packet_offset)->getPayload();
     packet_type = this->mPacketsRecieved.at(packet_offset)->getPacketType();
 
-    //Row parsing
-    //If the recieved packet is not an EOF or ERR packet
+    //Row parsing : if the recieved packet is not an EOF or ERR packet
     if (packet_type == PACKET_UNKNOWN)
     {
         //Allocate 3D array (first dimension is columns)
@@ -395,6 +364,10 @@ bool MySQL::parseTable(void)
     return false;
 }
 
+/**
+ * @brief Prints the recieved table to the default stdout buffer
+ * 
+ */
 void MySQL::printDatabase(void)
 {
     if (this->mDatabase != NULL)
@@ -421,6 +394,10 @@ void MySQL::printDatabase(void)
     }
 }
 
+/**
+ * @brief Free database struct
+ * 
+ */
 void MySQL::freeDatabase(void)
 {
     __NOP();
@@ -466,6 +443,13 @@ void MySQL::freeDatabase(void)
     }
 }
 
+/**
+ * @brief Responds to the server handshake sequence by logging in using User and Password
+ * 
+ * @param user MySQL user
+ * @param password MySQL session password
+ * @return int Bytes sent through TCP socket
+ */
 int MySQL::send_authentication_packet(const char *user, const char *password)
 {
     int status = 0;
@@ -540,6 +524,13 @@ int MySQL::send_authentication_packet(const char *user, const char *password)
     return status;
 }
 
+/**
+ * @brief Hash password using server seed
+ * 
+ * @param password MySQL session password
+ * @param pwd_hash server seed
+ * @return int (0 : Error | 1 : OK)
+ */
 int MySQL::scramble_password(const char *password, uint8_t *pwd_hash)
 {
     SHA1Context sha;
@@ -618,6 +609,10 @@ int MySQL::scramble_password(const char *password, uint8_t *pwd_hash)
     return 1;
 }
 
+/**
+ * @brief Cleans TCP socket
+ * 
+ */
 void MySQL::flush_packet()
 {
     uint8_t *data_rec = NULL;
@@ -647,6 +642,10 @@ void MySQL::flush_packet()
     data_rec = NULL;
 }
 
+/**
+ * @brief Parse handshake sent by server
+ * 
+ */
 void MySQL::parse_handshake_packet()
 {
     int i = 5;
@@ -666,32 +665,10 @@ void MySQL::parse_handshake_packet()
         mSeed[j + 8] = this->mBuffer[i + j];
 }
 
-int MySQL::check_ok_packet()
-{
-    int type = this->mBuffer[4];
-    if (type != PACKET_OK)
-        return type;
-    return 0;
-}
-
-int MySQL::getNewOffset(const uint8_t *packet, int offset)
-{
-    //Reads the length encoded variable value to jump it
-    int str_size = readLenEncInt(packet, offset);
-    uint8_t len = *(packet + offset);
-
-    if (len < 251)
-        offset += 1 + str_size;
-    else if (len == 0xFC)
-        offset += 3 + str_size;
-    else if (len == 0xFD)
-        offset += 4 + str_size;
-    else if (len == 0xFE)
-        offset += 9 + str_size;
-
-    return offset;
-}
-
+/**
+ * @brief Free mBuffer
+ * 
+ */
 void MySQL::freeBuffer(void)
 {
     if (this->mBuffer != NULL)
