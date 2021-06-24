@@ -1,5 +1,5 @@
 # STM32-MySQL
-MySQL Client for STM32 using [Mbed library](https://github.com/ARMmbed/mbed-os)
+MySQL Client for STM32 using [Mbed framework](https://github.com/ARMmbed/mbed-os)
 
 ## Implement this code
 - Add the library to your mbed project (Right click on you project folder, and select **Add Library...**)
