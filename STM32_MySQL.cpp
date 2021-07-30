@@ -180,11 +180,10 @@ int MySQL::write(char *message, uint16_t len)
  * 
  * @param pQuery Query
  * @param Database Database structure to store results
- * @return TypeDef_Database* Database
+ * @return bool state
  */
 bool MySQL::query(const char *pQuery)
 {
-    char *packet = NULL;
     int packet_len = 0;
     int payload_len = 0;
     int ret = 0;
@@ -199,24 +198,30 @@ bool MySQL::query(const char *pQuery)
     // Header + Payload length
     packet_len = payload_len + 4;
 
-    //Allocate memory for the packet
-    packet = (char *)malloc(packet_len);
-    if (packet == NULL)
-        return false;
+    struct mysql_packet_t
+    {
+        uint8_t payload_len[3] = {0};
+        uint8_t sequence_id = 0;
+        uint8_t query_type = 0;
+        uint8_t payload[2048] = {0};
+    };
 
-    //Set 3 first bytes as the payload length
-    store_int((uint8_t *)packet, payload_len, 3);
+    struct mysql_packet_t mysql_packet;
 
-    //Edit protocol related bytes
-    packet[3] = 0x00; //Sequence ID : Initiator
-    packet[4] = 0x03; //Set flag to COM_QUERY
+    // Set payload length
+    store_int((uint8_t *)mysql_packet.payload_len, payload_len, 3);
 
-    //Insert query into packet
-    memcpy(packet + 5, pQuery, strlen(pQuery));
+    // Sequence ID to 0 : initiator
+    mysql_packet.sequence_id = 0;
 
-    //Send the query
-    ret = this->write(packet, packet_len);
-    free(packet);
+    // Query type to 0x03 (COM_QUERY)
+    mysql_packet.query_type = 0x03;
+
+    // Copy request into payload
+    memcpy(mysql_packet.payload, pQuery, payload_len - 1);
+
+    // Write data over TCP socket
+    ret += this->write((char *)&mysql_packet, packet_len);
 
     if (ret > 0)
     {
@@ -224,9 +229,11 @@ bool MySQL::query(const char *pQuery)
         if (this->recieve())
         {
             int packet_count = (int)this->mPacketsRecieved.size();
+
             if (packet_count == 1)
             {
                 Packet_Type packet_type = this->mPacketsRecieved.at(0)->getPacketType();
+
                 switch (packet_type)
                 {
                 case PACKET_OK:

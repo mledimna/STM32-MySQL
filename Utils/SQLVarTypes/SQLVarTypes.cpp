@@ -124,7 +124,7 @@ void store_int(uint8_t *buff, long value, int size)
     buff[1] = (uint8_t)(value >> 8);
     buff[2] = (uint8_t)(value >> 16);
   }
-  else if (value < 0xffffff)
+  else
   {
     buff[0] = (uint8_t)value;
     buff[1] = (uint8_t)(value >> 8);
