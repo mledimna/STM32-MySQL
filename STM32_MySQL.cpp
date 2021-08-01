@@ -10,6 +10,7 @@
  */
 
 #include "STM32_MySQL.h"
+#include "../sys/debug/logger_debug.h"
 
 /**
  * @brief Creates a MySQL object
@@ -112,10 +113,71 @@ bool MySQL::recieve(void)
     // Socket return type to check if there was something to read or if an error occured
     nsapi_size_or_error_t recv_len = 0;
 
+    // Free dnamically allocated buffer
     this->freeBuffer();
 
+    // Used to check which packet is treated
+    uint8_t packet_count = 0;
+    do
+    {
+        memset(data, 0, RECV_SIZE);
+
+        mTcpSocket->set_blocking(true);
+        mTcpSocket->set_timeout(5000);
+
+        recv_len = mTcpSocket->recv(data, 3);
+
+        // We MUST recieve 3 bytes representing the payload length encoded int<3>
+        if (recv_len == 3)
+        {
+            // Read payload size
+            int payload_sz = readFixedLengthInt(data, 0, 3);
+
+            // Increment recieved length by payload size
+            recv_len = mTcpSocket->recv(data + 3, payload_sz);
+            LOG("After header, expected %d bytes, recieved %d bytes", payload_sz, recv_len);
+
+            // set mBuffer size corresponding to the recieved length
+            this->mBufferSize += recv_len + 3;
+
+            // If it's the first packer, alloc, else realloc
+            if (packet_count == 0)
+            {
+                this->mBuffer = (uint8_t *)malloc(sizeof(uint8_t) * this->mBufferSize);
+            }
+            else
+            {
+                this->mBuffer = (uint8_t *)realloc(this->mBuffer, sizeof(uint8_t) * this->mBufferSize);
+            }
+
+            // Copy data content into buffer
+            memcpy(this->mBuffer + (this->mBufferSize - recv_len), data, recv_len);
+        }
+    } while (recv_len > 0);
+
+    //If there was nothing to read, return an error to the user
+    if (this->mBufferSize > 0)
+    {
+        // Parse the received block into packets.
+        for (int offset = 0; offset < (int)this->mBufferSize;)
+        {
+            // Add packet to vector
+            this->mPacketsRecieved.push_back(new MySQL_Packet(this->mBuffer + offset));
+
+            // Increment offset used to parse packets from mBuffer
+            offset += this->mPacketsRecieved.back()->getPacketLength();
+        }
+
+        // Cean free allocades memory for mBuffer
+        this->freeBuffer();
+
+        return true;
+    }
+
+    /*
     //To avoid blocking the actual thread, set the recieve timeout to 1000ms
-    mTcpSocket->set_timeout(100);
+    mTcpSocket->set_timeout(300);
+    // mTcpSocket->set_blocking(false);
 
     // Recieve loop
     do
@@ -159,6 +221,7 @@ bool MySQL::recieve(void)
 
         return true;
     }
+    */
     return false;
 }
 
@@ -169,7 +232,7 @@ bool MySQL::recieve(void)
  * @param len 
  * @return int 
  */
-int MySQL::write(char *message, uint16_t len)
+nsapi_size_or_error_t MySQL::write(char *message, uint16_t len)
 {
     //Send raw data to socket
     return mTcpSocket->send((void *)message, len);
@@ -186,7 +249,7 @@ bool MySQL::query(const char *pQuery)
 {
     int packet_len = 0;
     int payload_len = 0;
-    int ret = 0;
+    nsapi_size_or_error_t tcp_socket_write_size = 0;
 
     this->freeBuffer();
     this->freeRecievedPackets();
@@ -208,7 +271,7 @@ bool MySQL::query(const char *pQuery)
 
     struct mysql_packet_t mysql_packet;
 
-    // Set payload length
+    //  Payload length
     store_int((uint8_t *)mysql_packet.payload_len, payload_len, 3);
 
     // Sequence ID to 0 : initiator
@@ -216,14 +279,15 @@ bool MySQL::query(const char *pQuery)
 
     // Query type to 0x03 (COM_QUERY)
     mysql_packet.query_type = 0x03;
-
+    
     // Copy request into payload
     memcpy(mysql_packet.payload, pQuery, payload_len - 1);
 
     // Write data over TCP socket
-    ret += this->write((char *)&mysql_packet, packet_len);
+    tcp_socket_write_size = this->write((char *)&mysql_packet, packet_len);
 
-    if (ret > 0)
+    // Check if TCP socket managed to
+    if (tcp_socket_write_size > 0)
     {
         //Receive results
         if (this->recieve())
@@ -237,15 +301,19 @@ bool MySQL::query(const char *pQuery)
                 switch (packet_type)
                 {
                 case PACKET_OK:
+                    // LOG("Packet OK");
                     return true;
 
                 case PACKET_ERR:
+                    // LOG("Packet ERR");
                     return false;
 
                 case PACKET_EOF:
+                    // LOG("Packet EOF");
                     return false;
 
                 case PACKET_UNKNOWN:
+                    // LOG("Packet UNKNOWN");
                     return false;
                 }
             }
@@ -253,10 +321,13 @@ bool MySQL::query(const char *pQuery)
             {
                 bool ret = this->parseTable();
                 this->freeRecievedPackets();
+                // LOG("parseTable() returned %s", ret?"true":"false");
                 return ret;
             }
+            // LOG("Not in fucking loop because packet_count : %d",packet_count);
         }
     }
+    // LOG("Unable to send query, ret : %d", ret);
     return false;
 }
 

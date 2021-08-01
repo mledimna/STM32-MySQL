@@ -23,7 +23,10 @@ uint32_t readFixedLengthInt(const uint8_t *packet, int offset, int size)
   uint32_t value = 0;
 
   for (int i = 0; i < size; i++)
-    value |= *(packet + offset + i) << (i * 8);
+  {
+    // value |= *(packet + offset + i) << (i * 8);
+    value += ((uint32_t)packet[offset+i])*((uint32_t)pow(10,i));
+  }
 
   return value;
 }

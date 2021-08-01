@@ -22,13 +22,21 @@
 #include "./Utils/SQLVarTypes/SQLVarTypes.h"
 
 /**
+ * @brief Used to send query over TCP socket.
+ * It MUST be equal to framework max TCP send buffer size
+ * otherwise TCP dialog will be interrupted by an overflow
+ * causing MYSQL query interruption and unintelligible
+ * request to server. 
+ */
+#define SEND_SIZE MBED_CONF_LWIP_TCP_SND_BUF
+
+/**
  * @brief Used to recieve RECV_SIZE bytes from server.
  * This does not limit the recieve size, incoming data
  * will then be sored into mBuffer which is a dynamic 
  * size buffer.
- * 
  */
-#define RECV_SIZE 1024
+#define RECV_SIZE SEND_SIZE
 
 typedef struct
 {
@@ -69,6 +77,20 @@ typedef struct
     TypeDef_Table *Table = NULL;
 } TypeDef_Database;
 
+/**
+ * @brief Stores the raw MySQL packet
+ * 
+ * @param payload_length Size of the payload in bytes.
+ * @param sequence_id MySQL packet number in current dialog.
+ * @param payload MySQL query result of size `payload_length`.
+ */
+typedef struct
+{
+    uint16_t payload_length;
+    uint8_t sequence_id;
+    uint8_t *payload;
+} mysql_packet_t;
+
 class MySQL
 {
 public:
@@ -80,8 +102,9 @@ public:
     void printDatabase(void);
 
 private:
-    // User configured TCP socket attached to NetworkInterface
+    // User-configured TCP socket attached to NetworkInterface
     TCPSocket *mTcpSocket = NULL;
+
     // MySQL Server IP
     const char *mServerIP = NULL;
 
@@ -89,7 +112,7 @@ private:
     uint8_t *mBuffer = NULL;
     uint32_t mBufferSize = 0;
 
-    // std::vector storing MySQL packets parsed from mBuffer
+    // MySQL packets parsed from mBuffer
     std::vector<MySQL_Packet *> mPacketsRecieved;
 
     // Seed used to hash password through SHA-1
@@ -99,7 +122,7 @@ private:
     TypeDef_Database *mDatabase = NULL;
 
     bool recieve(void);
-    int write(char *message, uint16_t len);
+    nsapi_size_or_error_t write(char *message, uint16_t len);
     int send_authentication_packet(const char *user, const char *password);
     void flush_packet(void);
     void parse_handshake_packet(void);
