@@ -28,7 +28,7 @@
  * causing MYSQL query interruption and unintelligible
  * request to server. 
  */
-#define SEND_SIZE MBED_CONF_LWIP_TCP_SND_BUF
+#define SEND_SIZE (MBED_CONF_LWIP_TCP_MSS * 2)
 
 /**
  * @brief Used to recieve RECV_SIZE bytes from server.
@@ -36,7 +36,7 @@
  * will then be sored into mBuffer which is a dynamic 
  * size buffer.
  */
-#define RECV_SIZE SEND_SIZE
+#define RECV_SIZE (SEND_SIZE)
 
 typedef struct
 {
@@ -86,7 +86,7 @@ typedef struct
  */
 typedef struct
 {
-    uint16_t payload_length;
+    uint8_t payload_length[3];
     uint8_t sequence_id;
     uint8_t *payload;
 } mysql_packet_t;
@@ -113,7 +113,7 @@ private:
     uint32_t mBufferSize = 0;
 
     // MySQL packets parsed from mBuffer
-    std::vector<MySQL_Packet *> mPacketsRecieved;
+    std::vector<MySQL_Packet> mPacketsRecieved;
 
     // Seed used to hash password through SHA-1
     uint8_t mSeed[20] = {0};
