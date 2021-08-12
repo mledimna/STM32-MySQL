@@ -8,6 +8,7 @@ typedef enum
 {
     PACKET_OK = 0x00,
     PACKET_UNKNOWN = 0x01,
+    PACKET_TEXTRESULTSET = 0x02,
     PACKET_EOF = 0xFE,
     PACKET_ERR = 0xFF
 } Packet_Type;

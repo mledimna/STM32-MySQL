@@ -113,7 +113,7 @@ private:
     uint32_t mBufferSize = 0;
 
     // MySQL packets parsed from mBuffer
-    std::vector<MySQL_Packet> mPacketsRecieved;
+    std::vector<MySQL_Packet*> mPacketsRecieved;
 
     // Seed used to hash password through SHA-1
     uint8_t mSeed[20] = {0};
@@ -123,17 +123,22 @@ private:
 
     bool recieve(void);
     nsapi_size_or_error_t write(char *message, uint16_t len);
+    
     int send_authentication_packet(const char *user, const char *password);
-    void flush_packet(void);
     void parse_handshake_packet(void);
-    bool parseTable(void);
+    
+    bool parse_textresultset(void);
+    void free_recieved_packets(void);
+
     int getNewOffset(const uint8_t *packet, int offset);
     int check_ok_packet(void);
     int scramble_password(const char *password, uint8_t *pwd_hash);
 
+    void flush_packet(void);
     void freeBuffer(void);
-    void freeRecievedPackets(void);
     void freeDatabase(void);
+
+    void print_packets_types(void);
 };
 
 #endif

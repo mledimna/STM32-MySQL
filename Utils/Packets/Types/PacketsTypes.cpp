@@ -11,7 +11,14 @@ Packet_Type MySQL_Packet::getPacketType(void)
         break;
 
     case 0xFE:
-        type = PACKET_EOF;
+        if (this->mPayloadLength >= 8)
+        {
+            type = PACKET_TEXTRESULTSET;
+        }
+        else
+        {
+            type = PACKET_EOF;
+        }
         break;
 
     case 0xFF:
@@ -19,6 +26,7 @@ Packet_Type MySQL_Packet::getPacketType(void)
         break;
 
     default:
+        type = PACKET_TEXTRESULTSET;
         break;
     }
 
