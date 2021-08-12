@@ -365,20 +365,14 @@ bool MySQL::query(const char *pQuery)
 
                     if (tcp_packet_status)
                     {
-                        this->print_packets_types();
-                        bool parse = this->parse_textresultset();
+                        return this->parse_textresultset();
                     }
-                    return tcp_packet_status;
+                    return false;
                 }
                 else if (type == PACKET_ERR)
                 {
-                    // Handle packet
-                    this->print_packets_types();
                     return false;
                 }
-
-                this->print_packets_types();
-
                 return true;
             }
         }
@@ -416,11 +410,11 @@ bool MySQL::parse_textresultset(void)
     Packet_Type packet_type = PACKET_OK;
     const uint8_t *packet = NULL;
 
-    uint32_t column_count = readLenEncInt(this->mPacketsRecieved.at(0)->mPayload, 0);
+    // uint32_t column_count = readLenEncInt(this->mPacketsRecieved.at(0)->mPayload, 0);
 
-    printf("%ld columns\r\n", column_count);
-    return true;
-    /*
+    // printf("%ld columns\r\n", column_count);
+    // return true;
+    
 
     // Clean already allocated Database
     this->freeDatabase();
@@ -452,7 +446,6 @@ bool MySQL::parse_textresultset(void)
     packet = this->mPacketsRecieved.at(packet_offset)->mPayload;
     packet_type = this->mPacketsRecieved.at(packet_offset)->getPacketType();
 
-    printf("Here");
     for (int i = 0; packet_type != PACKET_EOF; i++)
     {
         //Check the next packet type to exit the for loop if needed
@@ -503,7 +496,7 @@ bool MySQL::parse_textresultset(void)
         return true;
     }
     return false;
-    */
+    
 }
 
 /**
