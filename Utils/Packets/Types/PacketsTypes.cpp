@@ -4,14 +4,21 @@ Packet_Type MySQL_Packet::getPacketType(void)
 {
     Packet_Type type = PACKET_UNKNOWN;
 
-    switch (this->getPayload()[0])
+    switch (this->mPayload[0])
     {
     case 0x00:
         type = PACKET_OK;
         break;
 
     case 0xFE:
-        type = PACKET_EOF;
+        if (this->mPayloadLength >= 8)
+        {
+            type = PACKET_TEXTRESULTSET;
+        }
+        else
+        {
+            type = PACKET_EOF;
+        }
         break;
 
     case 0xFF:
@@ -19,6 +26,7 @@ Packet_Type MySQL_Packet::getPacketType(void)
         break;
 
     default:
+        type = PACKET_TEXTRESULTSET;
         break;
     }
 
