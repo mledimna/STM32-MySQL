@@ -254,18 +254,6 @@ bool MySQL::query(const char *pQuery)
          * Source : https://dev.mysql.com/doc/internals/en/mysql-packet.html
          */
 
-        // // Flush TCP socket
-        // this->mTcpSocket->set_blocking(false);
-
-        // for (nsapi_size_or_error_t sz_err = 0; sz_err > 0;)
-        // {
-        //     uint8_t data = 0;
-        //     sz_err = this->mTcpSocket->recv(&data, 1);
-        // }
-
-        // this->mTcpSocket->set_blocking(true);
-        // this->mTcpSocket->set_timeout(5000);
-
         // Payload length
         store_int((uint8_t *)tcp_socket_buffer, payload_len, 3);
 
@@ -324,7 +312,6 @@ bool MySQL::query(const char *pQuery)
                  * - Length encoded integer (Payload > 8 bytes)
                  * - EOF packet
                  */
-
                 type = this->mPacketsRecieved.at(0)->getPacketType();
 
                 if (type == PACKET_TEXTRESULTSET)
@@ -367,17 +354,18 @@ bool MySQL::query(const char *pQuery)
                     {
                         return this->parse_textresultset();
                     }
+                    this->free_recieved_packets();
                     return false;
                 }
                 else if (type == PACKET_ERR)
                 {
+                    this->free_recieved_packets();
                     return false;
                 }
                 return true;
             }
         }
     }
-
     return false;
 }
 
@@ -409,12 +397,6 @@ bool MySQL::parse_textresultset(void)
     int packet_offset = 0;
     Packet_Type packet_type = PACKET_OK;
     const uint8_t *packet = NULL;
-
-    // uint32_t column_count = readLenEncInt(this->mPacketsRecieved.at(0)->mPayload, 0);
-
-    // printf("%ld columns\r\n", column_count);
-    // return true;
-    
 
     // Clean already allocated Database
     this->freeDatabase();
@@ -458,7 +440,6 @@ bool MySQL::parse_textresultset(void)
     packet = this->mPacketsRecieved.at(packet_offset)->mPayload;
     packet_type = this->mPacketsRecieved.at(packet_offset)->getPacketType();
 
-
     //Row parsing : if the recieved packet is not an EOF or ERR packet
     if (packet_type == PACKET_TEXTRESULTSET)
     {
@@ -496,7 +477,6 @@ bool MySQL::parse_textresultset(void)
         return true;
     }
     return false;
-    
 }
 
 /**
@@ -556,8 +536,6 @@ void MySQL::freeDatabase(void)
                     }
                     // Free row
                     free(this->mDatabase->Table->Row_Values[col]);
-                    // Free column
-                    // free(this->mDatabase->Table->Column_Names[col]);
                 }
             }
 
